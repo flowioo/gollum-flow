@@ -5,7 +5,8 @@
 > **核心原则**
 > **Agent 不以"完成 Task"作为进展，而以"改变 Outcome"作为进展。**
 
-详细 Goal / Outcome 设计见 [09-goal-outcome-model.md](./09-goal-outcome-model.md)。本节只覆盖「执行层」的状态机。
+详细 Goal / Outcome 设计见 [09-goal-outcome-model.md](./09-goal-outcome-model.md)。
+本节覆盖「执行层」的状态机。
 
 层次结构（语义层 → 执行层）：
 
@@ -21,20 +22,42 @@ Project
 
 ---
 
-## 2. 标准 Workflow 流程（升级版）
+## 2. Task 定义（V0.1 调整版）
+
+> **Task = 能在有限时间内独立执行、独立验证、失败可重试，并对某个 Outcome 产生明确增量的最小工作单元。**
+
+**关键属性**：
+
+| 属性 | 含义 |
+|---|---|
+| **有限时间** | 目标 10–30min。预计 > 30min 必须由 Planner 优先拆分 |
+| **独立执行** | 不依赖其他 Task 的中间状态（除非显式声明） |
+| **独立验证** | 有自己的 `acceptance_criteria`，对应一个 Verify Tool 调用 |
+| **失败可重试** | 幂等 or 显式声明副作用可回滚 |
+| **明确 Outcome 增量** | Verify PASS 后 Outcome.progress 有可量化的变化 |
+
+**为什么不与「Session 长度」绑定**：
+
+> 业务 Task 应该按「结果是否独立、可验证」拆，而不是按「Agent 能连续干多久」拆。
+> 一个 Session 可能跑多个 Task；一个 Task 也可能被多个 Session 接力。
+> **业务 Task ≠ 执行器寿命。**
+
+---
+
+## 3. 标准 Workflow 流程
 
 ```
 Trigger
    ↓
-Load Project / Goal            ← 新增：每次唤醒带 Goal Context
+Load Project / Goal
    ↓
-Load active Outcomes           ← 新增：看活跃 Outcomes 列表
+Load active Outcomes
    ↓
 Observe current state
    ↓
-Evaluate Outcome Gap           ← 新增：哪个 Outcome Gap 最大？
+Evaluate Outcome Gap
    ↓
-Select Outcome                 ← 新增：按 Gap 大小选
+Select Outcome
    ↓
 Select / Create Task
    ↓
@@ -46,25 +69,20 @@ Verify
    ↓
 Update Task
    ↓
-Update Outcome                 ← 新增：用 evidence 更新 Outcome.progress
+Update Outcome
    ↓
-Goal Alignment Check           ← 新增：检查是否跑偏
+Goal Alignment Check
    ↓
 Checkpoint
    ↓
 Wait / Continue / Complete
 ```
 
-### 新增步骤的语义
-
-- **Load Project / Goal**：每次唤醒必须先知道在做什么方向，避免执行层一上来就选 Task 跑偏。
-- **Evaluate Outcome Gap**：不是先问「下一个 Task 是什么」，而是「哪个 Outcome 距离完成最远」。按 Gap 大小选，而非按 Task 创建顺序选。
-- **Update Outcome**：Verify PASS 后不仅更新 Task，也要更新 Outcome 的 `progress` 和 `evidence_ids`。Outcome 才是进展单位。
-- **Goal Alignment Check**：每次完成一轮自检「Task 在推进 / Outcome 仍服务 / 没偏离 Goal」。出现 Task 很忙但 Outcome 没动，立刻触发 recover。
+详细见 [03-task-model.md](./03-task-model.md) 和 [09-goal-outcome-model.md](./09-goal-outcome-model.md)。
 
 ---
 
-## 3. Task 状态机（执行层）
+## 4. Task 状态机（执行层）
 
 ```
 PENDING
@@ -93,11 +111,6 @@ DONE          RUNNING
                FAILED
 ```
 
-> 注：原方案中「SUCCESS」改名为「DONE」，与 Outcome 的 `achieved` 状态做语义区分。
-> - **Task.DONE** = 这件事完成了
-> - **Outcome.achieved** = 这个阶段成果成立了
-> - **Goal.achieved** = 长期目标达成
-
 ### 状态语义
 
 | 状态 | 含义 | 下一步触发 |
@@ -108,7 +121,7 @@ DONE          RUNNING
 | **BLOCKED** | 必须等用户（付款 / 删生产 / 缺权限 / 重大歧义） | 用户 unblock |
 | **VERIFYING** | 正在执行 Verify 子流程 | Verify 结果（PASS/FAIL/UNKNOWN） |
 | **RECOVERING** | 失败后重新 Observe + Replan | 回到 RUNNING 或 FAILED |
-| **DONE** | 完成 | 终态（但要触发 Update Outcome） |
+| **DONE** | 完成 | 终态（触发 Update Outcome） |
 | **FAILED** | 达到失败边界 | 终态 |
 
 ### 关键不变量
@@ -116,15 +129,15 @@ DONE          RUNNING
 - `RUNNING` 必须配对 `lease_until`，否则视为 Agent Crash。
 - `BLOCKED` 不允许自动 unblock，必须 Human。
 - `WAITING` 不持有 lease，Scheduler 可随时在 `wake_at` 时重调度。
-- `VERIFYING` 是 `RUNNING` 的子状态，不是独立生命周期，但必须落 Event。
-- **Task DONE 不等于 Outcome achieved**。DONE 后必须立刻 Update Outcome，让 Outcome 评估是否真的推进。
+- `VERIFYING` 是 `RUNNING` 的子状态，不是独立生命周期。
+- **Task DONE 不等于 Outcome achieved**。DONE 后立刻 Update Outcome。
 
 ### 状态转移表
 
 | From | Event | To | Tool |
 |---|---|---|---|
 | PENDING | scheduler 选中 | RUNNING | `task.claim` |
-| RUNNING | 等 CI / 部署 | WAITING | `task.wait` |
+| RUNNING | 等外部条件 | WAITING | `task.wait` |
 | RUNNING | 需人工决策 | BLOCKED | `task.block` |
 | RUNNING | 开始验证 | VERIFYING | 内部 |
 | RUNNING | 失败触发恢复 | RECOVERING | `task.checkpoint(reason="failure")` |

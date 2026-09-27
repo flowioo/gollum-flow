@@ -100,49 +100,48 @@ CLI 必须强制 `--outcome-id`，否则报错。**没有 Outcome 的 Task 不�
 
 ---
 
-## 3. 第一个 Demo：Autonomous Coding Task
+## 3. 第一个 Demo：V0.1 Minimal Demo（自主循环证明）
 
-这是 V0.1 的真正考验。
+> **V0.1 只证明自主循环，不证明生态集成。**
+
+详见 [10-v01-minimal-demo.md](./10-v01-minimal-demo.md)。
+
+一句话：
+
+> 关闭 Agent，再重新启动，它还能知道自己为什么工作、做到哪了、接下来该做什么，并最终把测试跑通。
+
+### Demo 形态
+
+故意准备一个 **2~3 个 bug 的本地 Repo**，给定 Goal：
 
 ```
-Project: gollum
-  └─ Goal: 让 Agent 能持续自主推进软件项目
-       └─ Outcome: Agent 能跨多次 wakeup 连续推进任务
-            └─ Task #1: 实现 workflow state 持久化
-            └─ Task #2: Task 调度 + Lease 实现
-            └─ Task #3: Verify 三态实现
-            └─ ...
-
-执行 Task #1
-  ↓
-Claim Task
-  ↓
-Execute (Codex)
-  ↓
-Verify (Verify PASS)
-  ↓
-Update Outcome.progress
-  ↓
-Goal Alignment Check (still aligned)
-  ↓
-Checkpoint
-  ↓
-Wait / Continue
+Goal: 修复项目，使全部测试通过
 ```
 
-### 这个 Demo 验证的关键能力
+Agent 自动拆 Outcome / Task → 跑测试 → 修复 → Verify → 失败后下一轮自动修复 → PASS 后结束。
 
-- ✅ 跨 Session
-- ✅ 状态恢复
-- ✅ Verify
-- ✅ Failure Recovery
-- ✅ Wait / Resume
-- ✅ 无人值守
-- ✅ **Outcome Gap 驱动调度**（新增）
-- ✅ **Goal Alignment 防止跑偏**（新增）
-- ✅ **Task DONE 触发 Outcome 更新**（新增）
+### 一次证明 6 个核心能力
 
-任何一个失败 = V0.1 不通过。
+| # | 能力 | 在 Demo 中的体现 |
+|---|---|---|
+| 1 | **Goal Alignment** | 每次新建 Task / Checkpoint 时 `goal-align` 返回 aligned |
+| 2 | **Task Planning** | Agent 从 Goal 自动拆 Outcome + Task 序列 |
+| 3 | **Persistence** | 进程退出后从 store 加载 Task，知道之前哪些已 DONE |
+| 4 | **Resume** | 重新唤醒后知道「为什么工作 / 做到哪 / 下一步」 |
+| 5 | **Verify** | 每个 Task 都有 Verify 步骤（运行 pytest），evidence 落库 |
+| 6 | **Recovery** | Task 修了部分 bug 后仍 verify fail → 系统继续推进而不是放弃 |
+
+### 不证明什么
+
+```
+❌ GitHub Issue 集成
+❌ PR 创建 / 评论 / Review
+❌ CI 平台集成
+❌ Webhook 触发
+❌ 多 Agent 协作
+```
+
+这些是 V0.5 的事。V0.1 跑通后，叠 Tool Integration 是 1+1 的事。
 
 ---
 
@@ -201,7 +200,11 @@ Workflow Store (SQLite + WAL)
   - Lease
 
 Scheduler
-  - 按 Outcome Gap 排序（V1.5）
+  - 按 Outcome Gap 排序
+
+WakeCondition 抽象
+  - timer 实现（V0.1 唯一需要）
+  - github_pr / ci_status 接口预留（V0.5）
 
 Task Event Log
   - 原事件 + Outcome / Goal 层事件
@@ -210,30 +213,48 @@ Task Event Log
   - task-run / task-resume / verify / recover
   - outcome-evaluate / goal-align
 
+Task Planner
+  - 自动拆 Outcome / Task
+  - 估算执行时间，> 30min 强制拆分
+
 12 Core Tools
   - task.* (8 个)
   - outcome.* (2 个)
   - goal.* (2 个)
 
-Verify: command / git / outcome-criterion
+Verify
+  - command (pytest / npm test)
+  - git (git status / git diff)
+  - outcome-criterion
 
 Codex Integration
+  - 本地 Codex CLI
+  - 启动时传 Task ID + Goal Context
+
+V0.1 Minimal Demo（详见 10）
+  - 本地 2-3 bug repo
+  - Goal → Outcome → Task 自动拆
+  - 跨进程 Resume
+  - Verify + Recover
 ```
 
 ### 不做
 
 ```
-Memory Evolution（自动提炼）
-Skill 自动生成
-Multi-Agent
-Distributed Scheduler
-Vector DB
-Robot
-Android
-复杂 DAG
-Workflow DSL
-outcome-decompose（自动拆 Task，先人工）
-goal-refine（Goal 微调，先人工）
+❌ GitHub Issue / PR / CI 集成
+❌ Webhook / Email / 文件触发
+❌ Memory Evolution（自动提炼）
+❌ Skill 自动生成
+❌ Multi-Agent
+❌ Distributed Scheduler
+❌ Vector DB
+❌ Robot
+❌ Android
+❌ 复杂 DAG
+❌ Workflow DSL
+❌ outcome-decompose 自动拆 Task（V0.1 用简单 Planner）
+❌ goal-refine（Goal 微调，先人工）
+❌ 任何外部 SaaS 依赖
 ```
 
 ### Outcome 层 Tool 接口（V0.1）

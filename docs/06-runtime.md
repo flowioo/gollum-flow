@@ -2,28 +2,64 @@
 
 ## 1. Workflow Trigger
 
-三种：
+### 1.1 抽象：WakeCondition
 
-### Timer
+V0.1 抽象出统一的 **WakeCondition** 接口：
 
-- 周期：`every 30m`
-- 最终推荐：**Task 自己指定 `wake_at`**
+```typescript
+interface WakeCondition {
+  type: "timer" | "github_pr" | "ci_status"
+  config: TimerConfig | GithubPRConfig | CIStatusConfig
+  next_wake_at?: string
+}
 
-### Event
+interface TimerConfig {
+  fire_at: string          // ISO8601
+}
 
-- GitHub webhook
-- CI completed
-- 邮件到达
-- 文件变化
-- Robot event
+interface GithubPRConfig {
+  repo: string
+  pr_number: number
+  watch_fields: ("status" | "checks" | "comments")[]
+}
 
-### Human
-
+interface CIStatusConfig {
+  repo: string
+  branch: string
+  watch_runs: ("completed" | "failed" | "success")[]
+}
 ```
-gollum run task-001
-```
 
-未来 Event Trigger 优先，Timer 作为 fallback。
+**关键点**：
+
+- V0.1 **只实现 3 种 polling condition**：`timer` / `github_pr` / `ci_status`
+- Webhook 是未来的 Trigger Adapter，**不是 V0.1 的事**
+- 每种 condition 都有 `next_wake_at`，Scheduler 据此唤醒
+- 即便是 polling（不是真 push），也通过 WakeCondition 统一抽象
+
+### 1.2 V0.1 三种 WakeCondition
+
+| type | 实现方式 | 适用场景 |
+|---|---|---|
+| **timer** | Scheduler 定时轮询 `wake_at <= now()` | 等固定时长后回来（demo repo 修复后等 30min 看是否需要继续） |
+| **github_pr** | 定时拉 PR 状态（V0.5 才用） | V0.1 Demo 不需要 |
+| **ci_status** | 定时拉 CI 状态（V0.5 才用） | V0.1 Demo 不需要 |
+
+### 1.3 Trigger 类型
+
+| 类型 | V0.1 |
+|---|---|
+| Timer / WakeCondition | ✅ |
+| Polling（github_pr / ci_status） | ⚠️ 接口预留，V0.5 实现 |
+| Webhook | ❌ → V0.5 |
+| Email 触发 | ❌ → V1 |
+| 文件变化 | ❌ → V1 |
+| Human（CLI） | ✅ `gollum run task-001` |
+
+**为什么 V0.1 只做 Timer**：
+
+V0.1 Minimal Demo 不需要外部 Trigger，30min 后的 wake 用 timer 即可。
+GitHub / CI / Webhook 都属于 Tool Integration，V0.5 再做。
 
 ---
 

@@ -264,26 +264,77 @@ task.update(task_id, expected_version, patch)
   → STATE_CONFLICT if version 已变
 ```
 
-Agent 收到 `STATE_CONFLICT` 必须：
+#### Agent 收到 STATE_CONFLICT 必须执行
 
 ```
-task.get → 重新 Observe → 重新 Decide
+reload latest state            ← task.get(task_id)
+  ↓
+jitter backoff 1–3s             ← sleep(随机 1–3s)
+  ↓
+re-evaluate                    ← 重新 Decide：基于最新 state，原 patch 可能已经过时
+  ↓
+CAS retry ≤ 3
 ```
 
-**CAS 冲突时退避策略（REVIEW.md 已建议）**：
+**绝对禁止**：拿到 STATE_CONFLICT 后**简单拿原 patch 数据重试**。patch 基于的是过期 state，原封不动重试大概率还是会冲突，或者覆盖了别人正确的更新。
+
+**3 次仍冲突**：
 
 ```
-sleep(随机 1–3s) → task.get → 重新 Decide → 重试 update
-最多 3 次，超出 → task.fail(reason="cas_thrashing")
+→ task.block(reason="cas_thrashing") 或 task.fail(reason="cas_thrashing")
+→ 触发 Planner 重新规划
+→ 不要无限循环消耗 lease
 ```
 
-并把 `STATE_CONFLICT` 单独统计到 Event Log。
+把 `STATE_CONFLICT` 单独统计到 Event Log，用于诊断 thrashing。
 
 ---
 
-## 6. Outcome / Goal 同步机制
+## 6. Task 定义（V0.1 最终）
 
-### 6.1 Outcome 更新
+> **Task = 能在有限时间内独立执行、独立验证、失败可重试，并对某个 Outcome 产生明确增量的最小工作单元。**
+
+### 6.0 五项硬性属性
+
+| 属性 | 含义 | Planner 怎么判断 |
+|---|---|---|
+| **有限时间** | 10–30min 目标 | 估算 > 30min → 强制拆分 |
+| **独立执行** | 不依赖其他 Task 的中间状态 | 检查 input deps |
+| **独立验证** | 有 acceptance_criteria + 可调 Verify Tool | 必须至少一条 verify.* 调用 |
+| **失败可重试** | 幂等 or 显式声明可回滚 | 检查 side effect list |
+| **明确 Outcome 增量** | Verify PASS 后 Outcome.progress 有变化 | criteria 数量 + progress 公式 |
+
+### 6.0.1 Task 不与 Session 绑定
+
+- 一个 Session 可跑多个 Task
+- 一个 Task 可被多个 Session 接力
+- Task **不关心**是谁在跑、跑了多久
+- Session 寿命与 Task 寿命完全解耦
+
+### 6.0.2 拆分规则
+
+```
+预计 > 30min
+  → Planner 必须先拆，拆完才能 claim
+
+预计 < 5min
+  → 警告：Task 太小，可能 overhead > value
+  → 建议合并到相邻 Task
+```
+
+### 6.0.3 重试规则
+
+```
+Task.retry_count < 3  → 直接重试（同策略）
+Task.retry_count ≥ 3  → 触发 recover Skill，换 Strategy
+Task.retry_count ≥ 5  → BLOCKED（升级到 Outcome 层决策）
+```
+
+---
+
+## 7. Outcome / Goal 同步机制
+
+### 7.1 Outcome 更新
 
 ```
 outcome.update(outcome_id, expected_version, patch)
@@ -291,7 +342,7 @@ outcome.update(outcome_id, expected_version, patch)
 
 只有 Verify PASS 后**且 Task DONE 后**才允许调用。
 
-### 6.2 Outcome 完成判定
+### 7.2 Outcome 完成判定
 
 ```
 for each criterion in success_criteria:
@@ -301,7 +352,7 @@ for each criterion in success_criteria:
 
 **禁止**：因为所有 Task 都 DONE 就把 Outcome 标 achieved。必须每条 criterion 都有 PASS evidence。
 
-### 6.3 Goal Alignment Check
+### 7.3 Goal Alignment Check
 
 由 `goal-align` Skill 执行，每次创建 Task 前 / Checkpoint 时调用。
 
@@ -322,7 +373,7 @@ const (
 
 ---
 
-## 7. Checkpoint
+## 8. Checkpoint
 
 不要记录 Agent 全部 reasoning。Checkpoint 只记录：
 
@@ -362,11 +413,11 @@ const (
 
 ---
 
-## 8. Event Log
+## 9. Event Log
 
 所有重要 Workflow 行为写入 append-only Event。
 
-### 8.1 原事件类型（保留）
+### 9.1 原事件类型（保留）
 
 ```
 TASK_CREATED
@@ -391,7 +442,11 @@ TASK_COMPLETED
 TASK_FAILED
 ```
 
-### 8.2 新增事件（Outcome / Goal 层）
+## 9. Event Log
+
+所有重要 Workflow 行为写入 append-only Event。
+
+### 9.1 原事件类型（保留）
 
 ```
 OUTCOME_GAP_EVALUATED       # 哪条 Outcome Gap 最大
@@ -426,7 +481,7 @@ GOAL_ACHIEVED
 
 ---
 
-## 9. Task 与 Session 的关系
+## 10. Task 与 Session 的关系
 
 ```
 Task
@@ -445,7 +500,7 @@ Session ID 仍然是 Trace 信息。
 
 ---
 
-## 10. Outcome Gap 评估接口
+## 11. Outcome Gap 评估接口
 
 V0.1 暴露给 Scheduler：
 

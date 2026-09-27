@@ -34,13 +34,65 @@
 > 只提供状态 + 工具 + 流程指引。
 > Loop 由 Host 负责。
 
-### 原则 8（新增）：进展以 Outcome 为单位，不以 Task 为单位
+### 原则 8（语义层）：进展以 Outcome 为单位，不以 Task 为单位
 
 > Agent 不以"完成 Task"作为进展，而以"改变 Outcome"作为进展。
 > Task 是动作，Outcome 是事实。
 > 完成一堆 Task 但 Outcome 没变化 = 没进展。
 
 这是语义层的最核心原则。所有 Workflow、Scheduler、Verify、Skill 设计最终都要服从这条。
+
+### 原则 9（Task 拆分）：Task 按结果拆，不按执行器寿命拆
+
+> **Task = 能在有限时间内独立执行、独立验证、失败可重试，并对某个 Outcome 产生明确增量的最小工作单元。**
+
+不绑定 Agent Session：
+- 一个 Session 可以跑多个 Task
+- 一个 Task 可以被多个 Session 接力
+- Task **不关心**是谁在跑、跑了多久
+
+目标 10–30min，预计 > 30min 时 Planner 优先拆分。
+
+业务 Task 应该按「结果是否独立、可验证、可重试、产生 Outcome 增量」拆，按 Session 寿命拆会污染 Task 边界。
+
+### 原则 10（CAS 冲突）：不能盲重试，要 reload + backoff + re-evaluate
+
+收到 `STATE_CONFLICT` 后：
+
+```
+reload latest state
+  ↓
+jitter backoff 1–3s
+  ↓
+re-evaluate（基于最新 state，原 patch 可能已过时）
+  ↓
+CAS retry ≤ 3
+```
+
+**绝对禁止**：拿原 patch 数据直接重试。
+
+3 次仍冲突 → `task.block(reason="cas_thrashing")` 或 `task.fail(reason="cas_thrashing")`，触发 Planner 重新规划。
+
+### 原则 11（Checkpoint / Memory 边界）：Checkpoint 是状态，不是知识
+
+Checkpoint 只存：
+
+- 当前执行状态
+- Artifact 引用
+- decision context（为什么做这个决定）
+
+**不存**用户偏好、技术经验、领域知识。
+
+Memory 独立。V0.1 不做自动归纳，避免错误知识进入长期记忆。
+
+### 原则 12（V0.1 范围）：先证明自主循环，不证明生态集成
+
+V0.1 的核心命题：
+
+> 关闭 Agent，再重新启动，它还能知道自己为什么工作、做到哪了、接下来该做什么，并最终把测试跑通。
+
+GitHub / CI / Webhook / PR 都属于 Tool Integration，不是 V0.1 的核心风险。
+V0.5 再做。
 
 ---
 
