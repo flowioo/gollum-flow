@@ -1,219 +1,195 @@
 # Gollum 方案评审
 
 > 评审视角：实施可行性 + 架构风险 + V0.1 落地路径
-> **V0.1 已经包含 Goal / Outcome 语义层 + 自主循环 Demo 简化**
+> **V0.1 已收敛为「自主循环可证明」+ 七层语义模型 + 砍掉 progress 数字**
 
 ---
 
 ## 1. 整体判断
 
-**方案质量：高，V0.1 的核心命题已明确。** 思路清晰、边界克制。引入 Outcome 作为进展单位是本质升级；Task 按结果拆而非按 Session 寿命拆是核心约束；V0.1 只证明自主循环、不碰生态集成是正确的范围控制。
+**方案质量：高。** 思路清晰、边界克制。引入 Outcome 作为进展单位是本质升级；Task 按结果拆而非按 Session 寿命拆是核心约束；V0.1 只证明自主循环、不碰生态集成是正确的范围控制。
 
-下面是对用户 5 条建议的采纳情况。
+**本轮关键收敛**：砍掉 `progress` 数字，改用 Outcome 状态机 + Criterion 三段式 + Evidence 派生。这是核心架构决定，**Goodhart's Law 防御**。
 
 ---
 
-## 2. 5 条建议全部采纳
+## 2. 5 个风险的拍板结果
 
-### 建议 1：Task 粒度按结果拆，不按 Session 寿命拆 ✅
+### 风险 1：success_criteria 谁写 ✅ 同意 + 加深
 
-**原文**：「不建议定义成'一次 Codex Session 能完成'，这会把业务 Task 和执行器绑定。更合理：Task = 一个可独立 Verify、失败后可安全重试的最小结果单元。」
+**你的拍板**：「V0.1 用户/上层 Planner 提供，CLI 只做结构校验，不做语义裁判。模糊词检测可以 warning，但不能阻止。很多真实目标本身就带主观性。」
 
-**采纳**。新定义见 [02-workflow.md §2](./02-workflow.md)：
+**采纳**。改进方案：**Criterion 三段式绑定**（criterion → verifier → evidence）。
 
-> **Task = 能在有限时间内独立执行、独立验证、失败可重试，并对某个 Outcome 产生明确增量的最小工作单元。**
+> 「稳定运行 4 小时」看似模糊，但有 `timer_check` 绑定 → **可验证**。
+> 真正不能验证的 criterion 是那些**没绑定 verifier** 的 → 标 `UNVERIFIED`。
+> CLI 不做语义裁判（不检测「稳定」「高效」），只做结构校验。
 
-五项硬性属性：
+详见 [09-goal-outcome-model.md §3](./09-goal-outcome-model.md)。
 
-| 属性 | 含义 |
+### 风险 2：progress gaming 🔥 直接砍掉
+
+**你的拍板**：「progress score 我建议直接砍掉。这是 Goodhart's Law：指标一旦成为目标，就不再是好指标。所以 Outcome 状态就够了...调度不看 83%。」
+
+**完全采纳**。
+
+> **Progress is not a number. Progress is verified state change.**
+
+砍掉方案：
+
+| 旧 | 新 |
 |---|---|
-| 有限时间 | 10–30min 目标，> 30min Planner 强制拆分 |
-| 独立执行 | 不依赖其他 Task 中间状态 |
-| 独立验证 | 有 acceptance_criteria + Verify Tool |
-| 失败可重试 | 幂等 or 显式声明副作用可回滚 |
-| 明确 Outcome 增量 | Verify PASS 后 Outcome.progress 有可量化变化 |
+| `progress: 0.0~1.0` | ❌ 砍掉 |
+| `progress = pass / total` | ❌ 公式砍掉 |
+| `Outcome.status = in_progress / achieved` | → `NOT_STARTED / IN_PROGRESS / BLOCKED / VERIFIED / FAILED` |
+| `Criterion` 是 JSON list | → 独立表 + `derived_status` 派生 |
+| 调度看 `progress` | → 调度看 `remaining_gap` + `priority` + `status` |
 
-### 建议 2：CAS 重试链明确定义 ✅
+新增原则 13（[08-principles.md](./08-principles.md)）。
 
-**原文**：「STATE_CONFLICT → reload latest state → jitter backoff 1–3s → re-evaluate → CAS retry ≤3。不要简单拿原数据重试；3 次仍冲突则 BLOCKED/FAILED(cas_thrashing)，触发重新规划。」
+### 风险 3：goal-align 准确性 ✅ 同意双轨 + 三级 + 不频繁找人
 
-**采纳**。新规则见 [03-task-model.md §5.4](./03-task-model.md)：
+**你的拍板**：「双轨思路对，但改成：Evidence-based check + LLM semantic check。若 misaligned，默认 pause/replan，只有涉及修改 Goal、删除关键 Outcome、扩大 scope 时才 Human confirm。」
 
-```
-reload latest state     ← task.get
-  ↓
-jitter backoff 1–3s
-  ↓
-re-evaluate             ← 基于最新 state，原 patch 可能已过时
-  ↓
-CAS retry ≤ 3
-```
+**采纳**。三级判定：
 
-**绝对禁止**：拿原 patch 数据直接重试。
-
-3 次仍冲突：
-
-```
-→ task.block(reason="cas_thrashing") 或 task.fail(reason="cas_thrashing")
-→ 触发 Planner 重新规划
-→ 不要无限循环消耗 lease
-```
-
-### 建议 3：Skill / Memory / Checkpoint 边界 ✅
-
-**原文**：「同意。Checkpoint 只存当前执行状态 + Artifact refs + decision context；Memory 独立。V0.1 不做自动归纳，避免错误知识进入长期记忆。」
-
-**采纳**。新增原则 11（[08-principles.md](./08-principles.md)）：
-
-> Checkpoint 是状态，不是知识。
-> Checkpoint 只存：当前执行状态 + Artifact 引用 + decision context。
-> 不存用户偏好、技术经验、领域知识。
-> Memory 独立。V0.1 不做自动归纳。
-
-### 建议 4：WakeCondition 抽象 ✅
-
-**原文**：「同意 V0.1 先 Timer + Polling。甚至抽象统一为 WakeCondition，先实现 timer / github_pr / ci_status 三种 polling condition，以后 Webhook 只是新的 Trigger Adapter。」
-
-**采纳**。V0.1 接口定义见 [06-runtime.md §1.1](./06-runtime.md)：
-
-```typescript
-interface WakeCondition {
-  type: "timer" | "github_pr" | "ci_status"
-  config: TimerConfig | GithubPRConfig | CIStatusConfig
-}
-```
-
-V0.1 实现：
-
-| type | 实现 |
-|---|---|
-| timer | ✅ |
-| github_pr | ⚠️ 接口预留，V0.5 实现 |
-| ci_status | ⚠️ 接口预留，V0.5 实现 |
-| webhook | ❌ → V0.5，作为新 Trigger Adapter |
-
-V0.1 Minimal Demo 只用 timer。
-
-### 建议 5：V0.1 Demo 简化 ✅ ✅ 核心变化
-
-**原文**：「把 Demo 改成：已有本地 Repo → 给定 Goal → Agent 自动拆 Outcome/Task → Codex 修改代码 → Test Verify → 失败后下一轮自动修复 → PASS 后结束。」
-
-**采纳**。新 Demo 详见 [10-v01-minimal-demo.md](./10-v01-minimal-demo.md)。
-
-核心命题：
-
-> **关闭 Agent，再重新启动，它还能知道自己为什么工作、做到哪了、接下来该做什么，并最终把测试跑通。**
-
-形态：
-
-```
-故意有 2~3 个 bug 的本地 Repo
-  ↓
-User: Goal "修复项目，使全部测试通过"
-  ↓
-Agent 自动拆 Outcome + Task
-  ↓
-跑测试 → 修 → Verify → 失败 → Checkpoint
-  ↓
-进程退出
-  ↓
-30min / 手动重启
-  ↓
-恢复 Goal + Outcome + State
-  ↓
-继续修剩余 Task → Verify PASS
-  ↓
-Outcome DONE → Goal DONE
-```
-
-一次证明 6 个核心能力：
-
-1. **Goal Alignment**
-2. **Task Planning**（自动拆 Outcome/Task）
-3. **Persistence**
-4. **Resume**
-5. **Verify**
-6. **Recovery**
-
-GitHub / CI / Webhook / PR 都属于 Tool Integration，**不是 V0.1 的核心风险**。
-
-> **关键词：V0.1 先证明自主循环，不证明生态集成。**
-
----
-
-## 3. 关闭的旧风险点
-
-下列风险已通过采纳建议关闭：
-
-| # | 旧风险 | 状态 |
+| verdict | 含义 | 系统动作 |
 |---|---|---|
-| 1 | Task 粒度与 Session 寿命绑定 | ✅ 已解决（Task 按结果拆） |
-| 6 | CAS 重试链未定义 | ✅ 已解决（reload + backoff + re-evaluate + ≤3） |
-| 7 | WAITING Event Trigger 没具体实现 | ✅ 已解决（WakeCondition 抽象 + V0.1 只做 timer） |
-| 8 | V0.1 Demo 太重 | ✅ 已解决（拆成本地 repo Demo，证明自主循环） |
+| `aligned` | 推进 Outcome | continue |
+| `uncertain` | 不确定 / evidence 矛盾 | re-evaluate / replan |
+| `misaligned` | 与 Outcome 无关 / scope creep | pause current task → rollback / backlog → 换 task |
+
+**核心变化**：`misaligned` 默认**不找人**，自己 pause / rollback / 换 task。
+
+> **Human 负责改变边界，不负责日常纠偏。**
+
+只有这些情况找 Human：
+- 修改 Goal
+- 删除关键 Outcome
+- 扩大 Outcome scope
+- 不可逆操作
+- 高风险操作
+
+新增原则 15（[08-principles.md](./08-principles.md)）。
+
+### 风险 4：Outcome 拆分粒度 ✅ 同意 + 改规则
+
+**你的拍板**：「≤7 Outcome / ≤5 criteria 可以作为 soft warning，不要做 hard limit。更好的规则：一个 Outcome 必须能独立 Verify，criteria 必须共同描述同一个结果。」
+
+**采纳**。改用更本质的规则：
+
+> **一个 Outcome 必须能独立 Verify。**
+> **Criteria 必须共同描述同一个结果。**
+
+数字上限作为 **soft warning**：
+- 每 Goal ≤ 7 Outcome → warning，不是 hard limit
+- 每 Outcome ≤ 5 criteria → warning
+
+### 风险 5：Project 层 ✅ 同意
+
+**你的拍板**：「Schema 保留 Project，V0.1 CLI 默认 singleton project。这是最省事的。」
+
+**采纳**。表结构保留，CLI 默认 singleton。
 
 ---
 
-## 4. 仍需关注的剩余风险
-
-| # | 风险 | 状态 |
-|---|---|---|
-| 2 | success_criteria 谁来定义 | 🟡 V0.1 用户手写 + CLI 校验 |
-| 3 | outcome.progress 可能被 gaming | 🟡 用 criteria 数量惩罚 + 综合权重 |
-| 4 | goal-align 判定准确性 | 🟡 双轨（客观 progress_delta + 主观 verdict）+ Human 兜底 |
-| 5 | Outcome 拆分粒度 | 🟡 上限经验值（每 Goal ≤ 7 Outcome，每 Outcome ≤ 5 criteria） |
-| 6 | Project 层 V0.1 是否强制 | 🟡 表结构保留，CLI 默认 singleton |
-
----
-
-## 5. 12 个待拍板的 V0.1 决策点（不变）
-
-| # | 决策 | 推荐 |
-|---|---|---|
-| 1 | Host | Codex CLI |
-| 2 | Store | SQLite + WAL |
-| 3 | CLI 语言 | TypeScript / Node |
-| 4 | MCP | stdio 模式 |
-| 5 | Task ID | ULID |
-| 6 | Event Log | append-only + 定期 checkpoint |
-| 7 | 默认 Lease | 15 min（Coding） |
-| 8 | CAS 冲突 | reload + backoff 1–3s + re-evaluate + ≤3（已升级） |
-| 9 | success_criteria 来源 | 用户手写 + CLI 校验 |
-| 10 | progress 公式 | pass/total + criteria 数量惩罚 |
-| 11 | goal-align 误判 | verdict ≥ misaligned 必须 Human |
-| 12 | Outcome 数量上限 | 每 Goal ≤ 7 Outcome |
-
----
-
-## 6. 实施路径（4 周 Minimal Demo）
+## 3. 关键概念：七层语义模型
 
 ```
-W1: Workflow Store + Project/Goal/Outcome/Task/Execution 表
-   + task.* / outcome.* / goal.* Tools
-   + outcome-evaluate / goal-align Skills 基础版
-   + Task Planner（>30min 强制拆）
+Goal            = 为什么做          (Direction)
+   ↓
+Outcome         = 想改变什么状态    (State to change)
+   ↓
+Criteria        = 什么算完成        (Definition of done)
+   ↓
+Evidence        = 凭什么说完成      (Proof)
+   ↓
+Task            = 怎么推进          (Action)
+   ↓
+Execution       = 一次尝试          (Attempt)
+   ↓
+Verify          = 验证              (Truth check)
+```
+
+详见 [09-goal-outcome-model.md](./09-goal-outcome-model.md)。
+
+---
+
+## 4. Criterion 三段式（核心新机制）
+
+```
+criterion  →  verifier  →  evidence
+              (怎么验证)   (凭什么说完成)
+```
+
+没有 verifier → criterion 标 `UNVERIFIED` → Outcome 无法 VERIFIED。
+
+CLI 不做语义裁判（不检测模糊词），只做结构校验（verifier 必须存在）。
+
+---
+
+## 5. Outcome VERIFIED 判定（V0.1 收敛版）
+
+```
+outcome_is_verified = for each criterion: derived_status == PASS
+```
+
+**不依赖 progress 数字**。只看 Criterion 是否都有 PASS evidence。
+
+---
+
+## 6. V0.1 决策点（最终版）
+
+| # | 决策 | 拍板 | 备注 |
+|---|---|---|---|
+| 1 | Host | **Codex CLI** | 你已经在用 |
+| 2 | Workflow Store | **SQLite + WAL** | 简单、够用 |
+| 3 | CLI 语言 | **TypeScript / Node** | 跟 Codex 同栈 |
+| 4 | MCP | **stdio 模式** | 复用社区方案 |
+| 5 | Task ID | **ULID** | 时间序 + 可排序 |
+| 6 | Event Log | **append-only + 定期 checkpoint** | |
+| 7 | 默认 Lease | **15 min（Coding）** | |
+| 8 | CAS 冲突 | **reload + backoff 1-3s + re-evaluate + ≤3** | 已升级 |
+| 9 | success_criteria 来源 | **用户/Planner 提供，CLI 做结构校验** | 不做语义裁判 |
+| 10 | progress | **🔴 直接砍掉，改用状态机 + remaining_gap** | Goodhart's Law 防御 |
+| 11 | goal-align 误判 | **三级 aligned/uncertain/misaligned；misaligned 自处理，不找人** | Human 只改边界 |
+| 12 | Outcome 数量上限 | **soft warning（≤7/≤5）** | 规则：必须独立 Verify |
+| 13 | Project 层 | **Schema 保留，CLI singleton** | 最省事 |
+| 14 | Criterion 三段式 | **criterion → verifier → evidence** | 没 verifier → UNVERIFIED |
+
+---
+
+## 7. 实施路径（4 周 Minimal Demo）
+
+```
+W1: Workflow Store + projects/goals/outcomes/criteria/tasks/executions/evidence/events 表
+   + task.* / outcome.* / goal.* / criterion.* / evidence.* Tools
+   + outcome-evaluate / goal-align Skills（三级版）
+   + Task Planner（>30min 强制拆）+ Criterion Verifier 绑定
    → Demo 1 骨架
 
 W2: Scheduler + WakeCondition (timer) + Codex 集成
-   + CAS / Lease / Outcome Gap 排序
+   + CAS / Lease / 按 remaining_gap 排序
    → Demo 2（跨进程 Resume 基础）
 
 W3: Verify 三态 + Recover
-   + outcome-criterion verify
-   + Update Outcome 自动联动
+   + outcome-criterion verify（调用 Criterion.verifier）
+   + attach_evidence → 自动更新 derived_status → 自动 VERIFIED Outcome
    → Demo 3（Failure Recovery）
 
-W4: Goal Alignment 实战 + scope_creep 检测
+W4: Goal Alignment 三级实战
+   + misaligned → pause / rollback / 换 task（不找人）
    + 完整跑通 V0.1 Minimal Demo（详见 10）
    + 20–30 个真实 Coding Task 验证
 ```
 
-每周末 commit 一次。
+每周末 commit 一次（已遵守）。
 
 ---
 
-## 7. 一句话总结
+## 8. 一句话总结
 
-> V0.1 的核心命题已收敛为「自主循环可证明性」，5 条建议全部采纳。
-> 12 个决策点不变，4 周可拿到 V0.1 Minimal Demo。
-> GitHub / CI / Webhook 留给 V0.5，先把架构本体跑通。
+> **本轮收敛砍掉 progress 数字，改用 Criterion 三段式 + Outcome 状态机 + goal-align 三级 + Human 只改边界。**
+> **核心原则：Progress is not a number. Progress is verified state change.**
+> **V0.1 先证明自主循环，不证明生态集成。**
+> 14 个决策点全部拍板，4 周可拿到 V0.1 Minimal Demo。

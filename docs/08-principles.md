@@ -94,6 +94,62 @@ V0.1 的核心命题：
 GitHub / CI / Webhook / PR 都属于 Tool Integration，不是 V0.1 的核心风险。
 V0.5 再做。
 
+### 原则 13（Progress）：进展不是数字，是被证据验证的状态变化
+
+> **Progress is not a number. Progress is verified state change.**
+> **进展不是一个百分比，而是被证据验证过的状态变化。**
+
+**砍掉** `progress = pass / total` 数字。**原因**：
+
+> **Goodhart's Law**: When a measure becomes a target, it ceases to be a good measure.
+> **指标一旦成为目标，就不再是好指标。**
+
+Agent 会刷分：
+
+- 拆更多容易完成的 criteria
+- 挑 criteria 数量少的 Outcome
+- 把 criterion 拆细刷分
+
+**替代方案**：
+
+```
+Outcome.status           = NOT_STARTED / IN_PROGRESS / BLOCKED / VERIFIED / FAILED
+Criterion.derived_status = UNVERIFIED / PASS / FAIL / UNKNOWN
+remaining_gap            = count(criterion.derived_status != PASS)
+```
+
+Agent 不能优化一个数字，只能优化**真实的状态变化**。
+
+### 原则 14（Criterion 三段式）：criterion → verifier → evidence
+
+每条 Criterion 必须绑定一个 Verifier。**没有 Verifier 的 Criterion 标 `UNVERIFIED`**。
+
+```
+criterion  →  verifier  →  evidence
+              (怎么验证)   (凭什么说完成)
+```
+
+「稳定运行 4 小时」看似模糊，但有 `timer_check` 绑定 → **可验证**，不是「模糊」。
+真正「不能验证」的 criterion 是那些没有 Verifier 的。
+
+**CLI 不做语义裁判**（不检测「稳定」「高效」），只做**结构校验**（criterion 必须有 verifier 路径）。
+
+### 原则 15（Human Boundary）：Human 负责改变边界，不负责日常纠偏
+
+V0.1 触发 Human 的情况（极少见）：
+
+- 修改 Goal（goal.update 修改 title/description）
+- 删除关键 Outcome
+- 扩大 Outcome scope（新增 criteria）
+- 不可逆操作
+- 高风险操作
+
+日常纠偏（misaligned Task / 选择下一个 Task / 修复 bug）→ Agent 自己处理。
+
+`goal-align` 返回 `misaligned` → Agent 自动 pause / rollback / backlog，**不找人**。
+`goal-align` 返回 `uncertain` → re-evaluate / replan。
+`goal-align` 返回 `aligned` → continue。
+
 ---
 
 ## 2. 关键词总表

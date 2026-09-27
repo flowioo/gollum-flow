@@ -100,9 +100,9 @@ WHERE status = 'WAITING'
   AND (lease_until IS NULL OR lease_until < now())
 ```
 
-### 2.3 调度策略（升级版）
+### 2.3 调度策略（V0.1 收敛版）
 
-V1.5 建议加 Outcome Gap 排序：
+> **核心**：Scheduler 不看 progress 数字，看状态机 + 剩余 gap + 优先级。
 
 ```sql
 SELECT t.*
@@ -111,16 +111,27 @@ JOIN outcomes o ON t.outcome_id = o.id
 WHERE t.status = 'WAITING'
   AND t.wake_at <= now()
   AND (t.lease_until IS NULL OR t.lease_until < now())
-  AND o.status = 'in_progress'
+  AND o.status = 'IN_PROGRESS'        -- 只调度进行中的 Outcome
 ORDER BY
-  o.priority DESC,           -- Outcome 优先级
-  (1.0 - o.progress) DESC,   -- Gap 大的优先
+  o.priority DESC,                    -- Outcome 优先级
+  o.remaining_gap DESC,               -- 剩余 gap 大的优先
   t.priority DESC,
   t.created_at ASC
 LIMIT 1
 ```
 
-> **按 Outcome Gap 排，而不是按 Task 创建时间排。**
+调度依据（替换 progress）：
+
+```
+选择下一个 Outcome:
+  1. status == IN_PROGRESS（不做 VERIFIED / BLOCKED / FAILED）
+  2. priority 高
+  3. remaining_gap > 0（有可执行 gap）
+  4. 没有 blocker
+  5. goal-align verdict == aligned（避开 misaligned）
+```
+
+> **不看 83%**。
 
 ### 2.4 调度上限
 
@@ -382,22 +393,26 @@ V0.1 Skill **手动维护**，Memory 自动提炼是 V0.5 的事。
 
 - 每轮 Workflow 开始前
 - Task DONE 后
-- Outcome 进入 achieved 候选时
+- Outcome 进入 VERIFIED 候选时（最后一次评估）
 
-### 9.2 Outcome 状态转移
+### 9.2 Outcome 状态转移（V0.1 收敛版）
 
 | From | To | 触发 |
 |---|---|---|
-| pending | in_progress | 第一个关联 Task 进入 RUNNING |
-| in_progress | achieved | 所有 success_criteria 都有 PASS evidence |
-| in_progress | failed | Outcome 失败边界已知 |
-| achieved | pending | Goal 调整导致 Outcome 重定义（罕见） |
+| NOT_STARTED | IN_PROGRESS | 第一个关联 Task 进入 RUNNING |
+| IN_PROGRESS | VERIFIED | **所有 Criterion.derived_status == PASS** |
+| IN_PROGRESS | FAILED | Outcome 失败边界已知 |
+| IN_PROGRESS | BLOCKED | 需要 Human 改变边界（修改 Goal / 删关键 Outcome / 不可逆操作） |
+| BLOCKED | IN_PROGRESS | Human unblock |
+| VERIFIED | IN_PROGRESS | 极少见：Goal 调整导致 Criterion 重定义 |
+
+> **砍掉 progress 字段**。VERIFIED 判定不依赖数字，只看 Criterion 状态。
 
 ### 9.3 Goal 状态转移
 
 | From | To | 触发 |
 |---|---|---|
-| active | achieved | 所有 active Outcome 都 achieved |
+| active | achieved | 所有 active Outcome 都 VERIFIED |
 | active | abandoned | Human 决策放弃 |
 
 ### 9.4 Goal Alignment Check 时机
@@ -407,3 +422,19 @@ V0.1 Skill **手动维护**，Memory 自动提炼是 V0.5 的事。
 - 检测到 Task 反复重试但 Outcome 不动时
 
 详见 [04-skills.md](./04-skills.md) `goal-align` Skill。
+
+### 9.5 Human Boundary 触发
+
+> **Human 负责改变边界，不负责日常纠偏。**
+
+V0.1 触发 Human 的情况（极少见）：
+
+```
+- 修改 Goal（goal.update 修改 title/description）→ Human confirm
+- 删除关键 Outcome（goal.block）→ Human confirm
+- 扩大 Outcome scope（新增 criteria）→ Human confirm
+- 不可逆操作（生产删数据 / 付款）→ Human confirm
+- 高风险操作 → Human confirm
+```
+
+日常纠偏（misaligned Task / 选择下一个 Task / 修复 bug）→ Agent 自己处理。

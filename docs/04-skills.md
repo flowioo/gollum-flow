@@ -121,56 +121,72 @@ Verify
 
 #### 1.5 outcome-evaluate
 
-**职责**：判断 Outcome 是否已经完成，当前 Gap 是什么，需不需要新增 Task。
+**职责**：判断 Outcome 当前状态，计算 remaining_gap，建议下一步动作。
+
+**V0.1 收敛版**：不计算 progress 数字，只用状态机 + 派生属性。
 
 ```
 outcome.get(outcome_id)
   ↓
-load latest evidence for each criterion
+load criteria[]
+for each criterion:
+  load latest_evidence
+  criterion.derived_status = derive_status(latest_evidence)
   ↓
-compute progress (pass / total)
+compute remaining_gap:
+  pass = count(criterion.derived_status == PASS)
+  remaining = count(criterion.derived_status != PASS)
+  breakdown = { FAIL: n, UNKNOWN: n, UNVERIFIED: n }
   ↓
-compute gap (1 - progress, weighted by importance)
-  ↓
-return {
-  progress,
-  gap,
-  unmet_criteria,
-  needs_new_task: bool,
-  reason
-}
+if all criteria PASS:
+    outcome.status = VERIFIED
+  else if any UNVERIFIED:
+    return { needs_new_task: false, reason: "criterion missing verifier" }
+  else:
+    return { remaining_gap: N, needs_new_task: true }
 ```
 
 调用时机：
 
 - 每轮 Workflow 开始前
 - 任何 Task DONE 时
-- Outcome 进入 `achieved` 候选时（最后一次评估）
+- Outcome 进入 `VERIFIED` 候选时（最后一次评估）
 
 实现要求：
 
 - 必须读 evidence 表，不能凭 memory
-- Gap 计算要可解释（哪个 criterion 没满足）
-- `needs_new_task` 是给 Scheduler 的 hint，不是 Agent 自己强制执行
+- Gap 计算要可解释（哪条 criterion 没满足、为什么）
+- `needs_new_task` 是给 Scheduler 的 hint，不是 Agent 强制执行
 
-#### 1.6 goal-align
+#### 1.6 goal-align（V0.1 三级版）
 
-**职责**：判断当前 Outcome 是否仍然服务 Goal，当前 Task 是否仍然值得继续，是否出现 scope creep。
+**职责**：判断当前 Outcome 是否仍然服务 Goal，当前 Task 是否仍然值得继续。
+
+**三级判定**：
 
 ```
-load Goal.description
-load Outcome.success_criteria
-load candidate Task.acceptance_criteria
-  ↓
-evaluate: does Task.material_advance(criterion)?
-  ↓
-evaluate: does Outcome.still_serve(Goal)?
-  ↓
-return AlignmentVerdict {
-  verdict: aligned | marginal | misaligned | scope_creep,
-  reason: string,
-  confidence: 0.0~1.0
-}
+verdict = aligned   → continue
+verdict = uncertain → re-evaluate / replan
+verdict = misaligned → pause current task → rollback / backlog → choose another task
+```
+
+**双轨判断**：
+
+```
+1. Evidence-based check:
+   - 过去 N 次 Execution 后，Outcome 的 remaining_gap 是否减少？
+   - Criterion.derived_status 是否有 PASS？
+   - 客观证据
+
+2. LLM semantic check:
+   - Task 是否直接推进 Outcome？
+   - 是否偏离 Goal 方向？
+   - 主观评估
+
+verdict 取两者中最保守的：
+  objective == aligned && llm == aligned   → aligned
+  objective == regression || llm == misaligned → misaligned
+  otherwise                                  → uncertain
 ```
 
 调用时机：
@@ -179,23 +195,39 @@ return AlignmentVerdict {
 - 每个 Checkpoint 时（轻量）
 - Detect 到 Task 反复重试但 Outcome 不动时
 
-**强制规则**：
+**何时找 Human（V0.1 收敛版）**：
+
+> **Human 负责改变边界，不负责日常纠偏。**
+
+只有这些情况找 Human：
+
+- Goal 本身需要修改
+- Outcome 定义需要删除/新增重大范围
+- 需求冲突无法自行解决
+- 不可逆操作
+- 高风险操作
+
+**`misaligned` 默认不找人**，而是自己处理：
 
 ```
-verdict == misaligned  → Task 必须经 Human 确认才能落地
-verdict == scope_creep → Task 直接拒绝（reject / backlog）
-verdict == marginal    → 自动继续，但记入 Event Log
-verdict == aligned     → 自动继续
+misaligned
+  ↓
+pause current task
+  ↓
+rollback / backlog
+  ↓
+choose another task
 ```
 
-### V1 Alignment Verdict 枚举
+自主性不被频繁打断。
+
+### V0.1 Alignment Verdict 枚举
 
 | verdict | 含义 | 系统动作 |
 |---|---|---|
-| `aligned` | Task 直接推进 Outcome.criterion | 自动继续 |
-| `marginal` | 间接推进，技术上合理但 Outcome 影响弱 | 自动继续，记 Event |
-| `misaligned` | 与当前 Outcome 无关 | 经 Human 确认 |
-| `scope_creep` | 偏离 Goal 方向 | 直接拒绝 |
+| `aligned` | Task 直接推进 Outcome.criterion | continue |
+| `uncertain` | 不确定或 evidence 矛盾 | re-evaluate / replan |
+| `misaligned` | 与 Outcome 无关 / scope creep | pause → rollback / backlog → 换 task |
 
 ---
 

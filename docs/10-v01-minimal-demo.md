@@ -78,12 +78,10 @@ T0: 启动 Agent
   ↓
 Load Goal: "修复项目，使全部测试通过"
   ↓
-outcome-evaluate
-  ↓
-Planner 自动拆 Outcome:
+Planner 自动拆 Outcome + Criteria:
   Outcome: "所有测试 PASS"
-  success_criteria: ["pytest 全绿"]
-  progress: 0.0
+  Criterion c1: "pytest 全绿"
+    verifier: { type: "command", config: { command: "pytest", expect: "exit 0" } }
   ↓
 Planner 自动拆 Task:
   Task 1: 分析 failing tests
@@ -91,16 +89,15 @@ Planner 自动拆 Task:
   Task 3: 修复 parser 边界条件
   Task 4: 修复 utils 死循环
   ↓
-goal-align(Task 1) → aligned (verdict=aligned)
+goal-align(Task 1) → aligned
   ↓
 Execute Task 1:
   - 运行 pytest
   - 收集失败列表
-  - Evidence: 3 tests failed
   ↓
-Verify Task 1 → PASS (acceptance_criteria: 列出所有 failing tests)
+Verify Task 1 → PASS
   ↓
-Update Outcome.progress → 0.25
+attach_evidence → 不直接动 Criterion（Task 1 不产出最终 evidence）
   ↓
 Checkpoint
 ```
@@ -117,18 +114,19 @@ goal-align(Task 2) → aligned
 Execute Task 2:
   - 修改 src/calculator.py
   - 运行 pytest
-  - Evidence: test_calculator.py 现在 PASS, test_parser.py 仍 FAIL, test_utils.py 仍 FAIL
+  - 收集 evidence（test_calculator.py 现在 PASS, test_parser.py 仍 FAIL, test_utils.py 仍 FAIL）
   ↓
-Verify Task 2 → PASS (acceptance_criteria: test_calculator.py PASS)
+Verify Task 2 → PASS (test_calculator.py PASS)
   ↓
-Update Outcome.progress → 0.5
+attach_evidence(c1, evidence) → criterion.derived_status 仍为 UNKNOWN（不是全部 PASS）
   ↓
 Checkpoint
   ↓
 *** 模拟进程崩溃（手动 kill Agent 进程） ***
   ↓
 Task 3 / Task 4 仍然 PENDING
-  Outcome.progress = 0.5
+  Criterion c1.derived_status = UNKNOWN
+  Outcome.status = IN_PROGRESS
 ```
 
 ### 第三轮：Resume + 修剩余 bug
@@ -138,13 +136,11 @@ T2: 30min 后 / 手动重启 Agent (新进程)
   ↓
 Load Project + Goal + Outcome
   ↓
-Load active Outcomes
+Load active Outcomes (status = IN_PROGRESS)
   ↓
 outcome-evaluate:
-  progress = 0.5
-  gap = 0.5
-  unmet_criteria: ["test_parser 仍 FAIL", "test_utils 仍 FAIL"]
-  needs_new_task: true
+  remaining_gap = 1 (c1.derived_status = UNKNOWN)
+  needs_new_task = true
   ↓
 Select Outcome (只有 1 个 active)
   ↓
@@ -157,28 +153,28 @@ Claim Task 3 → RUNNING
 Execute Task 3:
   - 修复 src/parser.py 边界条件
   - 运行 pytest
-  - Evidence: test_parser.py 现在 PASS, test_utils.py 仍 FAIL
+  - 收集 evidence（test_parser.py 现在 PASS, test_utils.py 仍 FAIL）
   ↓
 Verify Task 3 → PASS
   ↓
-Update Outcome.progress → 0.75
+attach_evidence(c1, evidence) → criterion.derived_status 仍为 UNKNOWN（utils 还 FAIL）
   ↓
 Select Task 4
   ↓
 Execute Task 4:
   - 修复 src/utils.py 死循环
   - 运行 pytest
-  - Evidence: ALL TESTS PASS
+  - 收集 evidence（ALL TESTS PASS）
   ↓
 Verify Task 4 → PASS
   ↓
-Update Outcome.progress → 1.0
+attach_evidence(c1, evidence) → criterion.derived_status = PASS
+  ↓
+outcome-evaluate: 所有 criterion PASS → Outcome.status = VERIFIED
   ↓
 goal-align → Task 已无 PENDING
   ↓
-Outcome.achieved
-  ↓
-Goal.achieved (因为所有 Outcome 都 achieved)
+Goal.achieve (所有 Outcome VERIFIED)
   ↓
 Demo 结束
 ```
@@ -275,13 +271,15 @@ def find_last(items: list, target) -> int:
 跑通这个 Demo 后，V0.1 还必须满足：
 
 ```
-Task DONE 必须能 Update Outcome.progress
-Outcome.progress = 1.0 时自动 achieved
-Goal 所有 Outcome achieved 时自动 achieved
+Task DONE 后能 attach_evidence 到对应 Criterion
+Criterion.derived_status 随最新 evidence.status 自动推导
+所有 Criterion.derived_status == PASS 时 Outcome 自动 VERIFIED
+所有 Outcome VERIFIED 时 Goal 自动 achieved
 跨进程重启后能 Resume
-CAS 冲突按 sleep(1-3s) + 重试 ≤3 次处理
+CAS 冲突按 reload + backoff 1-3s + re-evaluate + ≤3 次处理
 Lease 过期自动可被重新接管
-Event Log 完整记录 OUTCOME_PROGRESS_UPDATED / TASK_RESUMED 等事件
+Event Log 完整记录 CRITERION_VERIFIED / OUTCOME_VERIFIED / TASK_RESUMED 等事件
+goal-align misaligned 时 Agent 自处理（pause → rollback → 换 task），不找人
 ```
 
 ---
@@ -341,6 +339,8 @@ gollum worker start
 
 # 查看进度
 gollum outcome show outcome-001
+# → status: IN_PROGRESS / VERIFIED
+# → criteria: c1 [PASS]
 
 # Demo 完成时
 gollum goal show goal-001

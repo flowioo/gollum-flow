@@ -51,11 +51,11 @@ Trigger
    ↓
 Load Project / Goal
    ↓
-Load active Outcomes
+Load active Outcomes (status=IN_PROGRESS)
    ↓
 Observe current state
    ↓
-Evaluate Outcome Gap
+Evaluate remaining_gap              ← 改：基于 criteria 状态，不算 progress
    ↓
 Select Outcome
    ↓
@@ -65,11 +65,13 @@ Claim Task
    ↓
 Execute
    ↓
-Verify
+Verify (调用 Criterion.verifier)
    ↓
 Update Task
    ↓
-Update Outcome
+attach_evidence → 更新 Criterion.derived_status
+   ↓
+评估 Outcome: 所有 Criterion 都 PASS? → Outcome VERIFIED
    ↓
 Goal Alignment Check
    ↓
@@ -77,6 +79,9 @@ Checkpoint
    ↓
 Wait / Continue / Complete
 ```
+
+> **核心变化**：砍掉 `progress = pass/total` 数字。改用 **Outcome 状态机 + Criterion.derived_status** 描述进展。
+> 详见 [09-goal-outcome-model.md §5](./09-goal-outcome-model.md)。
 
 详细见 [03-task-model.md](./03-task-model.md) 和 [09-goal-outcome-model.md](./09-goal-outcome-model.md)。
 

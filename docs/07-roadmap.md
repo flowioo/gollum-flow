@@ -261,10 +261,30 @@ V0.1 Minimal Demo（详见 10）
 
 ```
 outcome.list_active(goal_id?) → Outcome[]
-outcome.get(outcome_id) → Outcome + latest_evidence + progress
-outcome.gap(outcome_id) → { progress, gap, unmet_criteria }
+outcome.get(outcome_id) → Outcome + criteria[]
+outcome.remaining_gap(outcome_id) → {
+  total_criteria, pass_count, fail_count, unknown_count, unverified_count, remaining
+}
 outcome.update(outcome_id, expected_version, patch)
-outcome.block(outcome_id, reason)
+outcome.block(outcome_id, reason)        // BLOCKED → Human
+outcome.mark_verified(outcome_id)        // 校验所有 criteria PASS
+outcome.mark_failed(outcome_id, reason)
+```
+
+### Criterion 层 Tool 接口（V0.1 新增）
+
+```
+criterion.create(outcome_id, description, verifier) → Criterion
+criterion.get(criterion_id) → Criterion + latest_evidence
+criterion.list(outcome_id) → Criterion[]
+criterion.attach_evidence(criterion_id, evidence) → 更新 derived_status
+```
+
+### Evidence 层 Tool 接口（V0.1 新增）
+
+```
+evidence.create(criterion_id, executor, status, data) → Evidence
+evidence.list(criterion_id) → Evidence[]
 ```
 
 ### Goal 层 Tool 接口（V0.1）
@@ -274,7 +294,8 @@ goal.list(project_id?) → Goal[]
 goal.get(goal_id) → Goal + Outcomes
 goal.create(...) → Goal
 goal.update(goal_id, expected_version, patch)
-goal.block(goal_id, reason)
+goal.block(goal_id, reason)              // 修改 Goal 边界 → Human
+goal.achieve(goal_id)                    // 所有 Outcome VERIFIED 后自动
 ```
 
 ---
@@ -296,12 +317,13 @@ Codex + Gollum
 | 维度 | 含义 |
 |---|---|
 | Success Rate | 完成 / 总任务 |
-| **Outcome Progress Rate** | Outcome.progress 平均推进速度 |
-| False Completion | 自报完成但其实没完成 |
+| **Outcome VERIFIED Rate** | Outcome 在指定时间内达到 VERIFIED 的比例 |
+| **Criterion DERIVED_PASS Rate** | Criterion 派生为 PASS 的比例 |
+| False Completion | 自报完成但其实没完成（CRITERION_UNVERIFIED 但 Outcome 标 VERIFIED） |
 | Recovery Rate | 失败后成功恢复的比例 |
 | Cross-session Resume | 跨 Session 恢复成功率 |
-| Human Intervention | 平均需要人介入次数 |
-| **Scope Creep Rate** | scope_creep 被识别的比例 |
+| Human Intervention | 平均需要人介入次数（V0.1 收敛版：应该极少） |
+| **Misaligned Pause Rate** | misaligned → pause / rollback 的比例（不找人） |
 | Token Cost | 单 Task token 消耗 |
 | 完成时间 | wall-clock |
 
@@ -311,12 +333,15 @@ Codex + Gollum
 
 ```
 Success ↑
-Outcome Progress ↑
+Outcome VERIFIED ↑
 False Completion ↓
-Scope Creep ↓
+Criterion UNVERIFIED ↓
+Misaligned 不找人 ↑
 Recovery ↑
 Human Intervention ↓
 ```
+
+**砍掉的指标**：`Outcome.progress` 数字（Goodhart's Law 防御）。
 
 ---
 
@@ -327,15 +352,16 @@ Human Intervention ↓
 | 指标 | 定义 |
 |---|---|
 | Task Success Rate | 完成 / 总任务 |
-| **Outcome Achievement Rate** | Outcome 在指定时间内 achieved 的比例 |
-| **Goal Achievement Rate** | Goal 在指定时间内 achieved 的比例 |
+| **Outcome VERIFIED Rate** | Outcome 在指定时间内达到 VERIFIED 的比例 |
+| **Goal Achieved Rate** | Goal 在指定时间内 achieved 的比例 |
 | Human-free Duration | 单 Outcome 无人介入最长时长 |
-| Human Intervention Count | 单 Outcome 平均介入次数 |
+| Human Intervention Count | 单 Outcome 平均介入次数（V0.1 收敛版应该极少） |
 | Cross-session Resume Success Rate | 跨 Session 恢复成功率 |
 | Recovery Rate | 失败后恢复比例 |
 | False Completion Rate | 假完成比例 |
-| Scope Creep Detection Rate | scope creep 识别率 / 实际发生率 |
-| Alignment Verdict Accuracy | goal-align 判定的准确率（事后人工 audit） |
+| **Criterion UNVERIFIED Rate** | 没绑定 verifier 的 criterion 比例（应该极低） |
+| Misaligned Pause Rate | misaligned → pause / backlog 的比例（不找人） |
+| Alignment Verdict Accuracy | goal-align 判定准确率（事后人工 audit） |
 | Tool Error Rate | Tool 调用失败率 |
 | Average Actions / Task | 单 Task 平均 Tool 次数 |
 | Token Cost | Token 消耗 |

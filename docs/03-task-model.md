@@ -84,27 +84,33 @@ evidence
   "id": "outcome-001",
   "goal_id": "goal-001",
   "title": "Agent 能跨多次 wakeup 连续推进任务",
-  "status": "in_progress",
-  "progress": 0.4,
-  "success_criteria": [
-    "scheduler 唤醒后能够恢复 workflow state",
-    "不会重复执行已完成 Task",
-    "发生失败后能够创建新的 Execution 重试"
-  ],
-  "evidence_ids": ["ev-008"],
+  "status": "IN_PROGRESS",
+  "criteria_ids": ["c1", "c2", "c3"],
   "version": 5
 }
 ```
 
-字段：`id` / `goal_id` / `title` / `success_criteria` / `status: pending|in_progress|achieved|failed` / `progress: 0.0~1.0` / `evidence_ids` / `version`
+字段：`id` / `goal_id` / `title` / `status: NOT_STARTED|IN_PROGRESS|BLOCKED|VERIFIED|FAILED` / `criteria_ids` / `version`
 
-`progress` 计算规则：
+**砍掉的字段**（V0.1 收敛版）：
+
+- ❌ `success_criteria`（JSON list）→ 拆成独立 `criteria` 表
+- ❌ `progress`（0.0~1.0）→ 完全砍掉（**Goodhart's Law**：指标变目标就不再是好指标）
+- ❌ `evidence_ids` → 移到 `evidence` 表，通过 `evidence.criterion_id` 关联
+
+`progress` 计算用 **状态机 + Criterion 派生状态** 替代：
 
 ```
-progress = verified_pass_criteria / total_criteria
+Outcome.status           = NOT_STARTED / IN_PROGRESS / BLOCKED / VERIFIED / FAILED
+Criterion.derived_status = UNVERIFIED / PASS / FAIL / UNKNOWN
+remaining_gap            = count(criterion.derived_status != PASS)
 ```
 
-每个 `success_criterion` 独立验证（PASS / FAIL / UNKNOWN），不能合并。
+Outcome VERIFIED 判定：
+
+```
+outcome_is_verified = for each criterion: derived_status == PASS
+```
 
 ### 3.4 Task
 
@@ -120,7 +126,7 @@ progress = verified_pass_criteria / total_criteria
     "已完成 Task 不重复执行"
   ],
   "alignment_verdict": "aligned",
-  "alignment_reason": "直接落实 outcome-001.criterion[1]",
+  "alignment_reason": "直接落实 outcome-001.criterion[c1]",
   "wake_at": null,
   "retry_count": 0,
   "version": 7,
@@ -129,9 +135,70 @@ progress = verified_pass_criteria / total_criteria
 }
 ```
 
-字段：`id` / **`outcome_id`（强约束）** / `title` / `acceptance_criteria` / `status` / `priority` / `wake_at` / `version` / `alignment_verdict: aligned|marginal|misaligned|scope_creep` / `alignment_reason`
+字段：`id` / **`outcome_id`（强约束）** / `title` / `acceptance_criteria` / `status` / `priority` / `wake_at` / `version` / `alignment_verdict: aligned|uncertain|misaligned` / `alignment_reason`
 
-### 3.5 Execution
+### 3.5 Criterion（V0.1 新增独立表）
+
+```json
+{
+  "id": "c1",
+  "outcome_id": "outcome-001",
+  "description": "scheduler 唤醒后能够恢复 workflow state",
+  "verifier": {
+    "type": "outcome_criterion",
+    "config": { "...": "..." }
+  },
+  "latest_evidence_id": "ev-008",
+  "derived_status": "PASS",
+  "version": 3
+}
+```
+
+字段：`id` / `outcome_id` / `description` / **`verifier: VerifierSpec | null`** / `latest_evidence_id` / `derived_status: UNVERIFIED|PASS|FAIL|UNKNOWN` / `version`
+
+**强约束**：
+
+- criterion 必填 `verifier`，否则 `derived_status = UNVERIFIED`
+- `derived_status` 自动从 `latest_evidence.status` 推导，不可手设
+- `derived_status == UNVERIFIED` 的 criterion 让 Outcome 无法 VERIFIED
+
+### 3.6 Verifier Spec
+
+```json
+{
+  "type": "command | git | outcome_criterion | timer_check | human_assert",
+  "config": { "...": "..." }
+}
+```
+
+V0.1 支持的 type：
+
+| type | config 示例 |
+|---|---|
+| `command` | `{ "command": "pytest", "cwd": "." }` |
+| `git` | `{ "branch": "main", "expect": "clean" }` |
+| `outcome_criterion` | `{ "ref_type": "outcome", "ref_id": "outcome-002" }` |
+| `timer_check` | `{ "duration": "4h", "signal_source": "event_log" }` |
+| `human_assert` | `{ "question": "..." }` |
+
+### 3.7 Evidence（V0.1 重构）
+
+```json
+{
+  "id": "ev-008",
+  "criterion_id": "c1",
+  "executor": "codex/session-123",
+  "status": "PASS",
+  "data": { "...": "..." },
+  "observed_at": "..."
+}
+```
+
+字段：`id` / **`criterion_id`** / `executor` / `status: PASS|FAIL|UNKNOWN` / `data` / `observed_at`
+
+> Evidence 挂在 **Criterion** 上（不是 Task）。Task 通过 Verify 调用 Criterion.verifier 产出 Evidence。
+
+### 3.8 Execution
 
 ```json
 {
@@ -149,27 +216,7 @@ progress = verified_pass_criteria / total_criteria
 
 字段：`id` / `task_id` / `executor: codex|claude-code|workbuddy` / `session_id`（trace only） / `started_at` / `finished_at` / `result: PASS|FAIL|UNKNOWN` / `error` / `retry_of: execution_id`
 
-### 3.6 Evidence
-
-```json
-{
-  "id": "ev-008",
-  "execution_id": "exec-001",
-  "outcome_id": "outcome-001",
-  "criterion": "scheduler 唤醒后能够恢复 workflow state",
-  "status": "PASS",
-  "data": { "...": "..." },
-  "observed_at": "..."
-}
-```
-
-Evidence 是 Outcome.progress 变化的唯一依据。
-
-### 3.7 Event
-
-Append-only event log（见第 8 节）。
-
-### 3.8 Artifact
+### 3.9 Artifact
 
 PR URL / file path / screenshot 等引用，不存原始内容。
 
@@ -290,7 +337,47 @@ CAS retry ≤ 3
 
 ---
 
-## 6. Task 定义（V0.1 最终）
+## 6. Progress 替代方案（V0.1 收敛版）
+
+### 6.1 砍掉 progress score
+
+> **Progress is not a number. Progress is verified state change.**
+> **进展不是一个百分比，而是被证据验证过的状态变化。**
+
+### 6.2 替代状态表达
+
+```
+Outcome.status           = NOT_STARTED / IN_PROGRESS / BLOCKED / VERIFIED / FAILED
+Criterion.derived_status = UNVERIFIED / PASS / FAIL / UNKNOWN
+remaining_gap            = count(criterion.derived_status != PASS)
+```
+
+### 6.3 Scheduler 调度依据（替代 progress）
+
+```
+选择下一个 Outcome:
+  1. status == IN_PROGRESS
+  2. priority 高
+  3. remaining_gap > 0
+  4. 没有 blocker
+  5. goal-align verdict == aligned
+```
+
+**不看 83%**。
+
+### 6.4 Goodhart's Law 防御
+
+`progress = pass/total` 一旦成为调度目标，Agent 会：
+
+- 拆更多容易完成的 criteria
+- 挑 criteria 数量少的 Outcome
+- 把 criterion 拆细刷分
+
+所以直接砍掉，改用状态机 + 派生属性。Agent 不能优化一个数字，只能优化**真实的状态变化**。
+
+---
+
+## 7. Task 定义（V0.1 最终）
 
 > **Task = 能在有限时间内独立执行、独立验证、失败可重试，并对某个 Outcome 产生明确增量的最小工作单元。**
 
@@ -302,7 +389,7 @@ CAS retry ≤ 3
 | **独立执行** | 不依赖其他 Task 的中间状态 | 检查 input deps |
 | **独立验证** | 有 acceptance_criteria + 可调 Verify Tool | 必须至少一条 verify.* 调用 |
 | **失败可重试** | 幂等 or 显式声明可回滚 | 检查 side effect list |
-| **明确 Outcome 增量** | Verify PASS 后 Outcome.progress 有变化 | criteria 数量 + progress 公式 |
+| **明确 Outcome 增量** | Verify PASS 后 Criterion 派生状态变化 | criterion.verifier 绑定 + evidence 产出 |
 
 ### 6.0.1 Task 不与 Session 绑定
 
@@ -342,17 +429,18 @@ outcome.update(outcome_id, expected_version, patch)
 
 只有 Verify PASS 后**且 Task DONE 后**才允许调用。
 
-### 7.2 Outcome 完成判定
+### 7.2 Outcome VERIFIED 判定
 
 ```
-for each criterion in success_criteria:
-  evidence = latest evidence for this criterion
-  if evidence.status != PASS: outcome 不算 achieved
+for each criterion in outcome.criteria:
+  if criterion.derived_status != PASS:
+    return VERIFIED 不成立
+return VERIFIED
 ```
 
-**禁止**：因为所有 Task 都 DONE 就把 Outcome 标 achieved。必须每条 criterion 都有 PASS evidence。
+**禁止**：因为所有 Task 都 DONE 就把 Outcome 标 VERIFIED。必须每条 Criterion 都有 PASS evidence。
 
-### 7.3 Goal Alignment Check
+### 7.3 Goal Alignment Check（三级版）
 
 由 `goal-align` Skill 执行，每次创建 Task 前 / Checkpoint 时调用。
 
@@ -362,14 +450,23 @@ for each criterion in success_criteria:
 type AlignmentVerdict string
 
 const (
-  Aligned      AlignmentVerdict = "aligned"      // 推进 Outcome.evidence
-  Marginal     AlignmentVerdict = "marginal"     // 间接推进
-  Misaligned   AlignmentVerdict = "misaligned"   // 与 Outcome 无关
-  ScopeCreep   AlignmentVerdict = "scope_creep"  // 偏离 Goal
+  Aligned    AlignmentVerdict = "aligned"     // 推进 Outcome.criterion
+  Uncertain  AlignmentVerdict = "uncertain"   // 不确定或 evidence 矛盾
+  Misaligned AlignmentVerdict = "misaligned"  // 与 Outcome 无关 / scope creep
 )
 ```
 
-`Misaligned` / `ScopeCreep` 必须经过 Human 确认才能落地。
+**三级动作**：
+
+| verdict | 系统动作 |
+|---|---|
+| `aligned` | continue |
+| `uncertain` | re-evaluate / replan |
+| `misaligned` | pause current task → rollback / backlog → choose another task |
+
+**`misaligned` 不找人**。Human 只在改变边界时介入（修改 Goal / 删关键 Outcome / 扩大 scope / 不可逆操作）。
+
+详见 [09-goal-outcome-model.md §6](./09-goal-outcome-model.md)。
 
 ---
 
@@ -391,13 +488,15 @@ const (
   "phase": "wait_ci",
   "summary": "Implemented idempotency fix and opened PR #456.",
   "observation": "CI currently running.",
-  "outcome_progress_delta": 0.33,
+  "criteria_delta": {
+    "c1": { "from": "FAIL", "to": "PASS", "evidence_id": "ev-008" }
+  },
   "next_action": "check_ci",
   "artifacts": ["PR#456"]
 }
 ```
 
-新增字段 `outcome_progress_delta` — 这次 Checkpoint 让 Outcome.progress 移动了多少。
+新增字段 `criteria_delta` — 这次 Checkpoint 让 Criterion.derived_status 发生了哪些变化。**不存 progress 数字**。
 
 ### Semantic Checkpoint 触发点
 
@@ -406,7 +505,7 @@ const (
 - ✅ 进入 WAITING
 - ✅ 进入 BLOCKED
 - ✅ 完成 Verify
-- ✅ Outcome.progress 发生变化
+- ✅ Outcome.progress 发生变化 → 改为 **Criterion.derived_status 发生变化**
 - ✅ Goal Alignment 触发新评估
 - ✅ 产生关键 Artifact（PR / 报告 / 部署）
 - ✅ Session 准备结束
@@ -442,19 +541,20 @@ TASK_COMPLETED
 TASK_FAILED
 ```
 
-## 9. Event Log
-
-所有重要 Workflow 行为写入 append-only Event。
-
-### 9.1 原事件类型（保留）
+### 9.2 新增事件（Outcome / Criterion / Goal 层）
 
 ```
-OUTCOME_GAP_EVALUATED       # 哪条 Outcome Gap 最大
-OUTCOME_PROGRESS_UPDATED    # Outcome.progress 变化
-OUTCOME_ACHIEVED            # Outcome 完成
+CRITERION_VERIFIED               # criterion.derived_status → PASS
+CRITERION_FAILED                 # criterion.derived_status → FAIL
+CRITERION_UNVERIFIED             # criterion 没绑定 verifier
 
-GOAL_ALIGNMENT_CHECKED      # goal-align 调用
-TASK_REJECTED_SCOPE_CREEP   # 拒绝 scope creep Task
+OUTCOME_REMAINING_GAP_EVALUATED  # remaining_gap 计算
+OUTCOME_VERIFIED                 # Outcome.status → VERIFIED
+OUTCOME_BLOCKED                  # Outcome.status → BLOCKED
+OUTCOME_FAILED                   # Outcome.status → FAILED
+
+GOAL_ALIGNMENT_CHECKED           # goal-align 调用（aligned/uncertain/misaligned）
+TASK_REJECTED_MISALIGNED         # misaligned → pause/backlog
 
 GOAL_ACHIEVED
 ```
@@ -465,15 +565,14 @@ GOAL_ACHIEVED
 {
   "task_id": "task-001",
   "outcome_id": "outcome-001",
-  "event": "OUTCOME_PROGRESS_UPDATED",
+  "event": "CRITERION_VERIFIED",
   "actor": "codex/session-123",
   "payload": {
-    "outcome_id": "outcome-001",
-    "old_progress": 0.33,
-    "new_progress": 0.66,
-    "criterion": "scheduler 唤醒后能够恢复 workflow state",
+    "criterion_id": "c1",
+    "from_status": "FAIL",
+    "to_status": "PASS",
     "evidence_id": "ev-008",
-    "verdict": "PASS"
+    "verifier_type": "command"
   },
   "timestamp": "..."
 }
@@ -500,13 +599,22 @@ Session ID 仍然是 Trace 信息。
 
 ---
 
-## 11. Outcome Gap 评估接口
+## 11. Outcome Gap 评估接口（V0.1 收敛版）
 
 V0.1 暴露给 Scheduler：
 
 ```
 outcome.list_active(goal_id) → Outcome[]
-outcome.gap(outcome_id) → { progress: 0.4, gap: 0.6, criteria_unmet: [...] }
+outcome.remaining_gap(outcome_id) → {
+  total_criteria: 5,
+  pass_count: 2,
+  fail_count: 1,
+  unknown_count: 0,
+  unverified_count: 2,
+  remaining: 4       // FAIL + UNKNOWN + UNVERIFIED
+}
 ```
 
-`outcome.gap` 让 Scheduler 能按 Gap 大小调度，而不是按 Task 创建时间。
+Scheduler 不再看 `progress` 数字，而是看 `remaining_gap.remaining` 和 priority。
+
+替代旧接口 `outcome.gap()` 中的 `progress` 字段。
