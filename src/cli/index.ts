@@ -36,6 +36,7 @@ import {
 } from '../mcp/core/task.js';
 import { evidenceCreate, evidenceList } from '../mcp/core/evidence.js';
 import { validatePlan, type PlannedGoal } from '../workflow/planner.js';
+import { schedulerCommand } from './commands/scheduler.js';
 
 const program = new Command();
 program
@@ -445,6 +446,11 @@ events
       );
     console.table(list);
   });
+
+// =============================================================================
+// scheduler (sub-command group)
+// =============================================================================
+program.addCommand(schedulerCommand());
 
 // =============================================================================
 // validate (Planner)

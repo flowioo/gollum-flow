@@ -45,4 +45,11 @@ Thumbs.db
 
 # Temporary
 tmp/
-.cache/*.db*
+.cache/
+
+# Scratch (debug-only files, NOT test fixtures)
+repro.ts
+vitest.config.ts
+
+# Old test backups
+*.test.ts.bak*.db*

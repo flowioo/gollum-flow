@@ -148,6 +148,16 @@ export class Store {
 
   /**
    * CAS update with retry + backoff + re-evaluate hook (DESIGN §6.2)
+   *
+   * Algorithm:
+   *   1. reload latest state
+   *   2. re-evaluate: derive fresh patch from latest state
+   *   3. CAS attempt
+   *   4. if StateConflict → jitter backoff 1–3s → retry ≤ 3
+   *
+   * reEvaluate is invoked on EVERY attempt (not only on conflict) so that
+   * patches are always derived from the latest state — never naively replayed
+   * (per DESIGN §6.2: "禁止简单拿原数据重试").
    */
   async casUpdateWithRetry<T extends { id: string; version: number }>(
     table: string,
@@ -160,8 +170,14 @@ export class Store {
     let patch = initialPatch;
 
     while (attempt < maxRetries) {
+      // 1. reload latest state
+      const current = this.get<T>(table as any, id);
+
+      // 2. re-evaluate based on latest state
+      patch = reEvaluate(current, initialPatch);
+
+      // 3. CAS attempt
       try {
-        const current = this.get<T>(table as any, id);
         return this.casUpdate<T>(table, id, current.version, patch as any);
       } catch (err) {
         if (err instanceof StateConflictError) {
@@ -169,9 +185,8 @@ export class Store {
           if (attempt >= maxRetries) {
             throw new StateConflictError(table, err.currentVersion, err.expectedVersion);
           }
+          // 4. jitter backoff 1–3s before next attempt
           await sleep(jitter(1000, 3000));
-          const latest = this.get<T>(table as any, id);
-          patch = reEvaluate(latest, initialPatch);
         } else {
           throw err;
         }

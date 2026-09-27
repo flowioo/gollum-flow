@@ -10,12 +10,10 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/cli/index.ts",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "tsx --test tests/*.test.ts",
+    "test:watch": "tsx --test --watch tests/*.test.ts",
     "lint": "eslint src --ext .ts",
-    "typecheck": "tsc --noEmit",
-    "db:migrate": "tsx src/workflow/store/migrate.ts",
-    "db:reset": "tsx src/workflow/store/migrate.ts --reset"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "commander": "^12.0.0",
@@ -27,8 +25,7 @@
     "@typescript-eslint/parser": "^7.0.0",
     "eslint": "^8.57.0",
     "tsx": "^4.7.0",
-    "typescript": "^5.4.0",
-    "vitest": "^1.6.0"
+    "typescript": "^5.4.0"
   },
   "engines": {
     "node": ">=18.0.0"

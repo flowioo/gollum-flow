@@ -131,6 +131,9 @@ export function outcomeUpdate(
 /**
  * Auto-evaluation entry point: returns true if all criteria are PASS
  * AND current status is IN_PROGRESS / NOT_STARTED → transition to VERIFIED.
+ *
+ * Auto-cascades through IN_PROGRESS if current status is NOT_STARTED
+ * (i.e., caller hasn't created any Tasks but already verified via direct evidence).
  */
 export function outcomeMarkVerified(store: Store, outcome_id: string): Outcome {
   const outcome = store.get<Outcome>('outcomes', outcome_id);
@@ -147,9 +150,22 @@ export function outcomeMarkVerified(store: Store, outcome_id: string): Outcome {
     );
   }
 
-  guardOutcomeTransition(outcome.status, 'VERIFIED');
+  let current = outcome;
+  // Auto-cascade NOT_STARTED → IN_PROGRESS if needed
+  if (current.status === 'NOT_STARTED') {
+    current = store.casUpdate<Outcome>('outcomes', outcome_id, current.version, {
+      status: 'IN_PROGRESS',
+    });
+    store.emit({
+      event: 'OUTCOME_IN_PROGRESS',
+      outcome_id,
+      payload: { reason: 'auto before mark_verified' },
+    });
+  }
 
-  const updated = store.casUpdate<Outcome>('outcomes', outcome_id, outcome.version, {
+  guardOutcomeTransition(current.status, 'VERIFIED');
+
+  const updated = store.casUpdate<Outcome>('outcomes', outcome_id, current.version, {
     status: 'VERIFIED',
   });
 

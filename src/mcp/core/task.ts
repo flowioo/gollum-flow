@@ -56,7 +56,7 @@ export function taskCreate(store: Store, input: TaskCreateInput): Task {
     status: 'PENDING',
     phase: null,
     priority: input.priority ?? 0,
-    acceptance_criteria: input.acceptance_criteria,
+    acceptance_criteria: input.acceptance_criteria ?? [],
     alignment_verdict: input.alignment_verdict ?? 'uncertain',
     alignment_reason: input.alignment_reason ?? null,
     owner: null,
