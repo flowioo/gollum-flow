@@ -1,12 +1,13 @@
 # Gollum 方案评审
 
 > 评审视角：实施可行性 + 架构风险 + V0.1 落地路径
+> **V0.1 已经包含 Goal / Outcome 语义层升级**
 
 ---
 
 ## 1. 整体判断
 
-**方案质量：高分。** 思路清晰、边界克制、没有自己造 Agent Loop 的轮子。但有几个关键决策点没拍死，会直接影响 V0.1 能不能在 1 个月内跑起来。
+**方案质量：高，且 V0.1 引入 Goal / Outcome 后语义更完整。** 思路清晰、边界克制、没有自己造 Agent Loop 的轮子。引入 Outcome 作为进展单位，是这套架构区别于普通 Agent Framework 的核心。但有若干决策点必须拍板，且 Outcome 层有几个隐藏成本需要在 V0.1 动工前想清楚。
 
 ---
 
@@ -14,58 +15,131 @@
 
 ### 2.1 Workflow Store = 唯一事实源
 
-这才是「跨 Session 持续工作」能成立的根本。不是把 Conversation 序列化，而是把 **Task** 物化成持久对象。Codex / Claude Code / WorkBuddy 都能接管同一个 Task，本质就是因为 Task 不依赖任何 Session 的内存。
+「跨 Session 持续工作」的根本原因。Task 物化成持久对象，Codex / Claude Code / WorkBuddy 都能接管。
 
 ### 2.2 Lease + CAS 而非锁
 
-正确选择。Agent 崩溃是常态，永久锁会变成「僵尸任务」。`lease_until + version` 是经过分布式系统验证的范式。
+正确选择。Agent 崩溃是常态，永久锁会变成「僵尸任务」。
 
 ### 2.3 Environment > Checkpoint
 
-这是「Verify First」的工程化体现。直接信任 Checkpoint 会让 Agent 在环境漂移时疯狂重复错误动作。
+「Verify First」的工程化体现。直接信任 Checkpoint 会让 Agent 在环境漂移时疯狂重复错误动作。
 
 ### 2.4 Verify 三态（PASS / FAIL / UNKNOWN）
 
-`UNKNOWN` 单独成态很重要。「我没拿到证据」≠「成功了」。很多 Agent 框架栽在这里。
+`UNKNOWN` 单列很重要，「没拿到证据」≠「成功」。
 
 ### 2.5 ToolResult 统一协议（Action + Observation + Evidence + Failure Semantics）
 
-把「Tool 调用」从 RPC 升级成「带失败语义的观察动作」。这一条是 Agent 可靠性的关键，单做 RPC 是不够的。
+把 Tool 从 RPC 升级成「带失败语义的观察动作」。
 
 ### 2.6 不抢 Agent Loop
 
-知道自己不做什么，比知道自己要做什么更难。Gollum 只做能力层，不做 Runtime，是非常清醒的边界。
+知道自己不做什么，比知道自己要做什么更难。
+
+### 2.7 Outcome 是进展单位，不是 Task ⭐ 升级后核心
+
+> **Agent 不以"完成 Task"作为进展，而以"改变 Outcome"作为进展。**
+
+这是 Gollum 区别于普通 Agent Framework 的本质。一个普通 Agent Framework 看的是「Task 完成率」；Gollum 看的是「Outcome.progress 实际推进了多少」。Task 完成一堆但 Outcome 没动 = 没进展。这是从「动作视角」升级到「事实视角」。
+
+### 2.8 Goal Alignment 抗 scope creep ⭐ 升级后核心
+
+Codex 跑 Coding Task 最容易发生的就是「技术跑偏」：发现 EventBus 写得不好就想去重写 Runtime。`goal-align` Skill 强制每次新建 Task 都要回答「这条 Task 在推进哪个 Outcome？Outcome 仍服务哪个 Goal？」直接挡住 scope creep。
+
+### 2.9 Outcome Gap 驱动调度 ⭐ 升级后
+
+Scheduler 不再按 `created_at` FIFO，而是按 `(1 - outcome.progress)` 排序。先做 Gap 大的，再做 Gap 小的。
 
 ---
 
 ## 3. 风险点（实施时必须想清楚）
 
-### 风险 1：Task 粒度定义模糊 ⚠️ 高优先
+### 风险 1：outcome.success_criteria 谁来定义？⚠️ 高优先
 
-方案里 Task 用 goal 描述（"fix GitHub issue #321"），但实际执行时粒度差很大：
+设计方案没明确这一点。
 
-- 简单：3 行 typo fix，5 分钟
-- 中等：加 idempotency + 测试，30 分钟
-- 困难：跨 5 个文件的架构改造，2 小时+
+| 候选 | 优点 | 缺点 |
+|---|---|---|
+| 用户创建 Outcome 时手写 | 可控、清楚 | 增加 onboarding 成本 |
+| Agent 自动提议 | 体验好 | 不可靠、容易遗漏 |
+| 混合：用户写骨架 + Agent 提议细化 | 平衡 | 复杂度 |
 
-**问题**：
+**建议 V1**：
 
-1. 粒度小 → Checkpoint 开销 > Task 本身，得不偿失
-2. 粒度大 → WAITING 拆不出去（CI 失败 vs 我还没写完是两回事）
+> Outcome 创建时强制填写 `success_criteria` 列表（最少 1 条，最多 7 条）。
+> 不允许空 criteria。
+> Agent 自动提议是 V0.5 的事。
 
-**建议 V1 规则**：
+每条 criterion 必须满足：
 
-> Task 粒度 = **一次 Codex Session 能完成的最大工作单元**。
-> 如果预估 > 30 分钟，必须拆 Task（父子 Task）。
+```
+可观察（Observable）
+可验证（Verifiable）
+可证伪（Falsifiable）
+具体（Concrete，无歧义）
+```
 
-否则 Lease 15 min 会被频繁打爆。
+CLI 应该做轻量校验：检测是否含模糊词（「稳定」「高效」「更好」「更优雅」），命中就 warn。
 
-### 风险 2：CAS 重试链未定义 ⚠️ 高优先
+### 风险 2：outcome.progress 可能被"gamed" ⚠️ 中优先
 
-`task.update(expected_version=17, patch)` 返回 `STATE_CONFLICT` 后，方案只说「重新 Observe + Decide」。但：
+如果 progress = `verified_pass_criteria / total_criteria`，Agent 可能：
 
-- 如果两个 Agent 在抢同一个 Task，且两者都在做正确的下一步动作，谁优先？
-- Agent 收到冲突后是 sleep + retry 还是 backoff + observe？
+- 挑 criteria 数量少的 Outcome（少做事高 progress）
+- 把 criterion 拆细刷 progress（看起来动了但实际没动）
+
+**建议**：
+
+> Progress 只是 hint，不作为调度唯一依据。
+> 调度综合看：`progress` + `priority` + `criteria 数量` + `Evidence 时间衰减`。
+> 加 `criteria 数量惩罚`：criteria 越少，权重越低（避免被钻空子）。
+
+### 风险 3：goal-align 的判定准确性 ⚠️ 中优先
+
+LLM 自己评估"是否在推进 Outcome"可能偏差：
+
+- 自我感觉良好 → 高估 aligned
+- 不理解 Goal 意图 → 误判 scope_creep
+
+**建议**：
+
+> **双轨判断**：
+> 1. 客观：`outcome.progress_delta`（过去 N 次 Execution 后 progress 是否变化）
+> 2. 主观：LLM verdict + reason
+>
+> 强约束：
+> - `misaligned` / `scope_creep` 必须经 Human 确认
+> - `marginal` 自动继续但记 Event Log
+> - 后续人工 audit 时统计 verdict_accuracy
+
+### 风险 4：Outcome 拆分的粒度 ⚠️ 高优先
+
+- 拆太细 → Outcome 数量爆炸，Agent 迷失
+- 拆太粗 → 进度反馈不及时
+
+**建议 V1 经验值**：
+
+```
+每个 Goal:   3–7 个 Outcome
+每个 Outcome: 3–5 个 success_criteria
+每个 Outcome 拆 5–20 个 Task
+```
+
+超过这个范围给 warning。
+
+### 风险 5：Project 层是否真的需要？⚠️ 低优先
+
+V0.1 只有一个 gollum 项目。
+
+**建议**：
+
+> 表结构保留 Project，但 V0.1 CLI 不强制 `project_id`（默认 singleton）。
+> V0.5 多项目并行时再补 CLI 强制。
+
+### 风险 6：CAS 重试链未定义 ⚠️ 高优先（V0.1 遗留）
+
+`task.update(expected_version=17, patch)` 返回 `STATE_CONFLICT` 后策略没说清。
 
 **建议**：
 
@@ -74,118 +148,107 @@ CAS_CONFLICT → sleep(随机 1–3s) → task.get → 重新 Decide → 重试 
 最多 3 次，超出 → task.fail(reason="cas_thrashing")
 ```
 
-并把 `STATE_CONFLICT` 单独统计到 Event Log（用于诊断）。
+并把 `STATE_CONFLICT` 单独统计到 Event Log。
 
-### 风险 3：Memory 与 Checkpoint 的边界没说清 ⚠️ 中优先
+### 风险 7：WAITING 的 Event Trigger 没给具体实现 ⚠️ 中优先
 
-第 29 节说「Memory 与 Workflow State 必须分离」，但 V0.1 又「不做 Memory Evolution」。这两条不冲突，但有一个真空：
+V0.1 建议只做 **GitHub Polling** + Timer，覆盖 80% Coding 用例。
 
-**Checkpoints 里到底放什么？**
+### 风险 8：V0.1 Demo 太重 ⚠️ 高优先（V0.1 遗留）
 
-- 如果放「用户偏好」（高德地图搜索后会异步刷新）→ 这是 Memory，会膨胀
-- 如果放「技术事实」（PR #456 已开）→ 这是 Workflow State，会过期
-
-**建议**：
-
-> Checkpoint 只放 **Workflow State + 关键 Artifact 引用**。
-> Memory 单独建表 `memories`，V0.1 只暴露 `memory.write/read`，不做自动提炼。
-> Skill 自动从 Memory 提炼这件事是 V0.5 的事。
-
-### 风险 4：WAITING 的 Event Trigger 没给具体实现 ⚠️ 中优先
-
-第 27 节说「未来优先 Event Trigger，Timer 是 fallback」。但 V0.1 怎么实现 Event？
-
-- GitHub webhook 需要公网回调，本地开发怎么办？
-- CI Event 怎么 polling？用 GitHub API 还是 gh CLI？
-- 邮件到达触发的 Event 来源？
-
-**建议 V0.1**：
-
-> 只做 **GitHub Polling**（定时拉 PR 状态）+ **Timer**。
-> 真 Webhook V0.5 再做。
-> 这能覆盖 80% 的 Coding Demo 用例。
-
-### 风险 5：Skill 与 Memory 的反馈回路没设计 ⚠️ 低优先（V0.1 可不做）
-
-Skill 是 Markdown，但 Memory 升级后 Skill 应该更新。V0.1 不做这件事没问题，但要在文档里明确写「Skill 是手动维护的」，避免后续被「Skill 自动从 Memory 进化」这件事绑架。
-
-### 风险 6：V0.1 Demo 太重 ⚠️ 高优先
-
-「GitHub Issue → PR → CI → 修复 → Merge」这条链看着完整，但 CI 集成坑很多：
-
-- CI 平台选择（GitHub Actions / CircleCI / Jenkins）？
-- 失败日志怎么结构化？
-- CI 修复可能需要多轮，要几次？
-- 重试 vs 升级到 BLOCKED 的边界？
-
-**建议**：
-
-> V0.1 Demo 拆成 **3 个微 Demo**，每个只验证一个核心能力：
+不要一上来就端到端跑全链路。拆 3 个微 Demo：
 
 ```
-Demo 1: 单 Session Coding Task
-  Issue → 改 → Test → PR → Complete
-  验证：Workflow Store + 4 Core Skills + Verify
-
-Demo 2: 跨 Session Resume
-  Task 写一半 → 强制 Session 退出 → 新 Session → Resume → 完成
-  验证：Checkpoint + Re-observe + CAS
-
-Demo 3: Failure Recovery
-  Task 写一半 → CI 失败 → 自动 Replan → 修复 → Verify → Complete
-  验证：WAITING + Recover + Verify 三态
+Demo 1: 单 Session Coding Task        ← 验证 Workflow Store + 6 Skills + Verify
+Demo 2: 跨 Session Resume            ← 验证 Checkpoint + Re-observe + CAS
+Demo 3: Failure Recovery              ← 验证 WAITING + Recover + Verify 三态
+Demo 4 (新增): Outcome Progress 推进 ← 验证 Outcome Gap + Goal Alignment + Update Outcome
 ```
 
-每个 Demo 1 周内能跑通，3 周拿到完整 V0.1。不要一上来就端到端跑全链路。
+每个 Demo 1 周内能跑通，4 周拿到完整 V0.1。
 
 ---
 
-## 4. 必须拍板的决策点
-
-下面这几条 **直接影响 V0.1 代码骨架**，需要在动手前确认。
+## 4. Goal / Outcome 层 5 个待拍板的决策点
 
 | # | 决策 | 推荐选项 | 理由 |
 |---|---|---|---|
-| 1 | 第一个 Host | Codex CLI | 用户已经在用，适配最快 |
-| 2 | Workflow Store | SQLite + WAL | 简单、够用、可单文件备份 |
-| 3 | CLI 语言 | TypeScript / Node | 跟 Codex 同栈，Skill 解析方便 |
-| 4 | MCP 实现 | 用 mcp-for-blender 同款 stdio 模式 | 复用社区方案，零造轮 |
-| 5 | Task ID 生成 | ULID | 时间序 + 全局唯一 + 可排序 |
-| 6 | Event Log 写入 | append-only + 定期 checkpoint | 简单，足够 V0.1 |
-| 7 | 默认 Lease | 15 min（Coding） | 跟单次 LLM 调用时长匹配 |
-| 8 | CAS 冲突处理 | sleep(1–3s) + 重试 ≤3 次 | 简单可控 |
+| 1 | success_criteria 谁写 | **用户写骨架，CLI 校验，V0.5 再 Agent 提议** | V0.1 不能让 LLM 自己定真理 |
+| 2 | progress 计算公式 | **pass / total，加 criteria 数量惩罚** | 抗 gaming |
+| 3 | goal-align 误判处理 | **misaligned/scope_creep 必须 Human 确认** | 不让 LLM 单独决定方向 |
+| 4 | Outcome 数量上限 | **每个 Goal ≤ 7 个 Outcome** | 防迷失 |
+| 5 | Project 层 V0.1 是否强制 | **保留表结构，CLI 默认 singleton** | 简化 V0.1 |
 
 ---
 
-## 5. 文档已经落地的部分
+## 5. 必须拍板的 8 个 V0.1 决策点（含升级版）
 
-✅ `docs/` 已包含：
+| # | 决策 | 推荐 | 备注 |
+|---|---|---|---|
+| 1 | 第一个 Host | **Codex CLI** | 你已经在用 |
+| 2 | Workflow Store | **SQLite + WAL** | 简单、够用 |
+| 3 | CLI 语言 | **TypeScript / Node** | 跟 Codex 同栈 |
+| 4 | MCP 实现 | **stdio 模式** | 复用社区方案 |
+| 5 | Task ID | **ULID** | 时间序 + 可排序 |
+| 6 | Event Log | **append-only + 定期 checkpoint** | |
+| 7 | 默认 Lease | **15 min（Coding）** | |
+| 8 | CAS 冲突 | **sleep(1–3s) + 重试 ≤3 次** | |
+| 9 | success_criteria 来源 | **用户手写 + CLI 校验** | 见 §4 |
+| 10 | progress 公式 | **pass/total + criteria 数量惩罚** | 见 §4 |
+| 11 | goal-align 误判 | **verdict ≥ misaligned 必须 Human** | 见 §4 |
+| 12 | Outcome 数量上限 | **每 Goal ≤ 7 Outcome** | 见 §4 |
+
+---
+
+## 6. 我的实施建议（升级版路径）
+
+```
+W1: Workflow Store + Project/Goal/Outcome/Task/Execution 表
+   + task.* (8 tools) + outcome.* + goal.*
+   + outcome-evaluate / goal-align Skills（基础版）
+   → Demo 1 骨架
+
+W2: Scheduler + Codex 集成
+   + CAS / Lease / Outcome Gap 排序
+   → Demo 2（跨 Session Resume）
+
+W3: Verify 三态 + Recover
+   + outcome-criterion verify
+   + Update Outcome 自动联动
+   → Demo 3（Failure Recovery）
+
+W4: Goal Alignment 实战
+   + scope_creep 检测 + Human 确认流程
+   → Demo 4（Outcome Progress 推进）
+
+W5: 20–30 个真实 Task A/B（Vanilla Codex vs Codex+Gollum）
+   收集自主性指标
+```
+
+每个 Demo 结束都 commit 一次（按你的工作原则：阶段完成及时 commit，方便回滚）。
+
+---
+
+## 7. 文档已经落地的部分
+
+✅ `docs/` 已包含（V0.1 升级版）：
 
 - README.md — 入口与索引
 - 01-architecture.md — 总体架构 + 核心原则
-- 02-workflow.md — Workflow 模型 + 状态机
-- 03-task-model.md — Task 数据模型 + Lease + CAS + Checkpoint + Event
-- 04-skills.md — Skills 设计
+- 02-workflow.md — Workflow 模型 + 状态机（**含 Outcome 主循环**）
+- 03-task-model.md — **Project/Goal/Outcome/Task/Execution 数据模型**
+- 04-skills.md — **6 Core Skills**（含 outcome-evaluate / goal-align）
 - 05-tools.md — Tool 架构 + ToolResult 协议
 - 06-runtime.md — Trigger / Scheduler / Host / Session / WAITING / HITL / Memory
 - 07-roadmap.md — 项目结构 + CLI + 阶段 + V0.1 验收 + 自主性指标
-- 08-principles.md — 七条工程原则 + 架构总结
+- 08-principles.md — 八条工程原则 + 关键词表
+- 09-goal-outcome-model.md — **Goal/Outcome 语义层核心设计**
 - REVIEW.md — **本文档**
 
 ---
 
-## 6. 我的建议（下一步）
+## 8. 一句话总结
 
-1. **先拍板第 4 节的 8 个决策点**（一次性确认，避免返工）。
-2. **按风险 6 拆 Demo**，不要端到端一锅端。
-3. **第一周只做 Workflow Store + task.get/claim/checkpoint/wait/complete**，跑通 Demo 1 的骨架。
-4. **第二周加 Scheduler + Codex 集成**，跑通 Demo 2。
-5. **第三周加 Verify + Recover**，跑通 Demo 3。
-6. **V0.1 结束用 20–30 个真实 Task 做 A/B**（Vanilla Codex vs Codex+Gollum）。
-
----
-
-## 7. 一句话总结
-
-> 方案思路正确、边界克制，关键补充是 **Task 粒度规则、CAS 重试链、Skill/Memory 边界、Event Trigger 落地、拆 Demo**。这 5 点不改，V0.1 大概率会卡。
-> 决策点拍板后就可以动工。
+> V0.1 引入 Goal / Outcome 后架构语义更完整，但**新增了 5 个必须拍板的决策点**（success_criteria 来源、progress 公式、goal-align 误判、Outcome 数量上限、Project 强制）。
+> 加上 V0.1 原有的 8 个决策点，共 **12 个**待确认项。
+> 全部拍板后即可以按 5 周路径动工。

@@ -34,13 +34,39 @@
 > 只提供状态 + 工具 + 流程指引。
 > Loop 由 Host 负责。
 
-## 2. 最终架构总结
+### 原则 8（新增）：进展以 Outcome 为单位，不以 Task 为单位
+
+> Agent 不以"完成 Task"作为进展，而以"改变 Outcome"作为进展。
+> Task 是动作，Outcome 是事实。
+> 完成一堆 Task 但 Outcome 没变化 = 没进展。
+
+这是语义层的最核心原则。所有 Workflow、Scheduler、Verify、Skill 设计最终都要服从这条。
+
+---
+
+## 2. 关键词总表
+
+| 概念 | 定义 | 角色 |
+|---|---|---|
+| Project | 顶层容器 | 工作域 |
+| Goal | 长期方向 | Direction |
+| Outcome | 可验证阶段结果 | Evidence of Progress |
+| Task | 推进 Outcome 的具体行动 | Action |
+| Execution | Task 的一次执行尝试 | Attempt |
+| Verify | 把假设变成事实 | Truth |
+| Evidence | Verify 留下的物证 | 唯一可信信号 |
+
+> 一句话：**Goal 是方向，Outcome 是事实，Task 是动作，Execution 是尝试，Verify 是真伪，Evidence 是证据。**
+
+---
+
+## 3. 最终架构总结
 
 ```
               Trigger
                  │
                  ▼
-             Scheduler
+             Scheduler            ← 按 Outcome Gap 排序
                  │
                  ▼
           Workflow Store
@@ -50,9 +76,10 @@
                  ▼
       Codex / CC / WorkBuddy
                  │
-               Skills
+               Skills              ← task-run/task-resume/verify/recover
+                 │                 ← outcome-evaluate/goal-align
                  │
-               Tools
+               Tools               ← task.* / outcome.* / goal.* / verify.*
                  │
                  ▼
              Environment
@@ -64,9 +91,16 @@
         │                  │
       PASS               FAIL
         │                  │
-    Complete            Recover
-                           │
-                         Retry
+    Update Task         Recover
+        │                  │
+    Update Outcome ─────► Retry
+        │
+   Goal Alignment
+        │
+   ┌────┴────┐
+aligned  scope_creep
+   │         │
+continue  block
 
 外部条件未满足
         │
@@ -76,10 +110,12 @@
         ▼
     Scheduler
         │
-        └──────────────→ Resume
+        └──────────────→ Resume (带 Goal Context)
 ```
 
-## 3. Gollum 长期定位
+---
+
+## 4. Gollum 长期定位
 
 **英文**
 
@@ -87,9 +123,13 @@
 
 **中文**
 
-> 让不同 Agent 能跨 Session、跨工具、跨环境持续可靠完成任务的能力层。
+> 让不同 Agent 能跨 Session、跨工具、跨环境持续可靠推进 Goal / Outcome 的能力层。
 
-## 4. 长期演进路径
+注意原方案的「完成任务」改成了「**推进 Goal / Outcome**」。一字之差，语义完全不同。
+
+---
+
+## 5. 长期演进路径
 
 ```
 Coding
@@ -103,4 +143,12 @@ Agentic Robot
 Embodied Personal Assistant
 ```
 
-底层 Workflow 模型保持不变，只往上叠加 Skills + Tools。
+四层 Project / Goal / Outcome / Task 保持不变，只往上叠加 Skills + Tools。
+
+---
+
+## 6. 架构升级日志
+
+- **V0.1（当前方案）**：新增 Goal / Outcome / Execution 三层；新增 outcome-evaluate / goal-align 两个 Skill；新增 Outcome Gap 驱动调度。
+- **V0.5 候选**：outcome-decompose（Outcome 自动拆 Task）；evidence-audit（周期审计）；skill-mine（从 Event Log 提炼 Skill）。
+- **V1+ 候选**：Goal 间依赖图（DAG）；多 Goal 并行；Agent 团队协作。
