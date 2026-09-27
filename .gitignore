@@ -56,4 +56,13 @@ vitest.config.ts
 
 # Python
 __pycache__/
-*.pyc*.db*
+*.pyc
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Agent host integration (user-level, not project-level)
+.codex/skills/gollum-*/
+.claude/skills/gollum-*/
+.mcp.json*.db*

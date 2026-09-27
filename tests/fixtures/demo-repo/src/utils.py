@@ -9,5 +9,5 @@ def find_last(items, target):
     while i >= 0:
         if items[i] == target:
             return i
-        i -= 1  # BUG: infinite loop
+        i -= 1  # FIXED
     return -1

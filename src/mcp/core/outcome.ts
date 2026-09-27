@@ -11,7 +11,7 @@
 import { ulid } from 'ulid';
 import { NotFoundError, type Store } from '../../workflow/store/store.js';
 import { guardOutcomeTransition } from '../../workflow/model/state.js';
-import type { Outcome, RemainingGap } from '../../workflow/model/types.js';
+import type { Outcome, OutcomeStatus, RemainingGap } from '../../workflow/model/types.js';
 
 // =============================================================================
 // 1. outcome.list_active
@@ -98,8 +98,11 @@ export function outcomeRemainingGap(store: Store, outcome_id: string): Remaining
 // 4. outcome.update (CAS)
 // =============================================================================
 
-export type OutcomePatch = Partial<Pick<Outcome, 'title' | 'status' | 'priority'>> & {
-  criteria_ids?: string; // JSON-stringified array
+export type OutcomePatch = {
+  title?: string;
+  status?: OutcomeStatus;
+  priority?: number;
+  criteria_ids?: unknown; // accepts string[] | JSON-string; serialized internally
 };
 
 export function outcomeUpdate(
@@ -112,7 +115,7 @@ export function outcomeUpdate(
   if (patch.status) {
     guardOutcomeTransition(outcome.status, patch.status);
   }
-  const updated = store.casUpdate<Outcome>('outcomes', outcome_id, expected_version, patch);
+  const updated = store.casUpdate<Outcome>('outcomes', outcome_id, expected_version, patch as Partial<Outcome>);
 
   store.emit({
     event: 'OUTCOME_UPDATED',
@@ -208,7 +211,7 @@ function maybeAchieveGoal(store: Store, goal_id: string): void {
 function parseOutcome(row: Outcome): Outcome {
   return {
     ...row,
-    criteria_ids: parseJSONArray(row.criteria_ids),
+    criteria_ids: parseJSONArray(row.criteria_ids as unknown as string),
     priority: row.priority,
   };
 }

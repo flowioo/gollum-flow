@@ -16,7 +16,7 @@
  */
 
 import { execSync } from 'node:child_process';
-import { type Store } from '../workflow/store/store.js';
+import { type Store } from '../../workflow/store/store.js';
 import { criterionAttachEvidence, criterionGet } from './criterion.js';
 import { ulid } from 'ulid';
 

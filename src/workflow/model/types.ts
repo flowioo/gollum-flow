@@ -41,6 +41,25 @@ export type ExecutorType = 'codex' | 'claude-code' | 'workbuddy';
 export type ArtifactType = 'file' | 'pr' | 'url' | 'screenshot' | 'log';
 
 // =============================================================================
+// ToolResult (DESIGN §20)
+// =============================================================================
+
+export type VerifyStatus = 'PASS' | 'FAIL' | 'UNKNOWN';
+
+export interface ToolResult<T = unknown> {
+  ok: boolean;
+  status: VerifyStatus;
+  data?: T;
+  observation: string;
+  evidence: Record<string, unknown>;
+  error: {
+    type: string;
+    message: string;
+    retryable: boolean;
+  } | null;
+}
+
+// =============================================================================
 // Verifier types (Criterion §7.3 in PRD)
 // =============================================================================
 

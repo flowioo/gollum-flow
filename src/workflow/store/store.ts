@@ -159,7 +159,7 @@ export class Store {
    * patches are always derived from the latest state — never naively replayed
    * (per DESIGN §6.2: "禁止简单拿原数据重试").
    */
-  async casUpdateWithRetry<T extends { id: string; version: number }>(
+  async casUpdateWithRetry<T extends { id: string; version: number; updated_at: string }>(
     table: string,
     id: string,
     initialPatch: Record<string, unknown>,
@@ -213,7 +213,7 @@ export class Store {
 
   list<T>(table: string, where: string = '1', params: unknown[] = []): T[] {
     const stmt = this.db.prepare(`SELECT * FROM ${table} WHERE ${where}`);
-    return stmt.all(...params) as T[];
+    return stmt.all(...(params as never[])) as T[];
   }
 
   // ===========================================================================
@@ -300,13 +300,14 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function serializeValue(v: unknown): unknown {
+function serializeValue(v: unknown): string | number | null {
   if (v === undefined) return null;
   if (v === null) return null;
   if (Array.isArray(v) || (typeof v === 'object' && v !== null && !(v instanceof Date))) {
     return JSON.stringify(v);
   }
-  return v;
+  if (typeof v === 'number' || typeof v === 'string') return v;
+  return String(v);
 }
 
 // =============================================================================

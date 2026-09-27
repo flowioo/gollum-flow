@@ -12,7 +12,7 @@
  */
 
 import type { Store } from '../store/store.js';
-import type { Task, Outcome } from '../model/types.js';
+import type { Task, Outcome, OutcomeStatus, AlignmentVerdict, TaskStatus } from '../model/types.js';
 import { outcomeRemainingGap } from '../../mcp/core/outcome.js';
 
 // =============================================================================
@@ -51,6 +51,7 @@ export function pickNextTasks(
   const now = new Date().toISOString();
 
   // Step 1+2: SQL query joining tasks and outcomes
+  type Row = Task & { o_priority: number; o_status: string; o_title: string };
   const rows = store.raw().prepare(`
     SELECT t.*, o.priority AS o_priority, o.status AS o_status, o.title AS o_title
     FROM tasks t
@@ -65,17 +66,38 @@ export function pickNextTasks(
       t.priority DESC,
       t.created_at ASC
     LIMIT ?
-  `).all(now, now, limit) as any[];
+  `).all(now, now, limit) as unknown as Row[];
 
   // Step 3: refine ordering by remaining_gap (computed in JS since SQLite
   // can't easily count criteria by status from a join)
   const enriched = rows.map((row) => {
-    const task = row as Task;
+    const task: Task = {
+      id: row.id,
+      outcome_id: row.outcome_id,
+      title: row.title,
+      status: row.status as TaskStatus,
+      phase: row.phase,
+      priority: row.priority,
+      acceptance_criteria: row.acceptance_criteria as unknown as string[],
+      alignment_verdict: row.alignment_verdict as AlignmentVerdict,
+      alignment_reason: row.alignment_reason,
+      owner: row.owner,
+      lease_until: row.lease_until,
+      wake_at: row.wake_at,
+      retry_count: row.retry_count,
+      next_action: row.next_action,
+      summary: row.summary,
+      last_observation: row.last_observation,
+      estimated_minutes: row.estimated_minutes,
+      version: row.version,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    };
     const outcome: Outcome = {
       id: row.outcome_id,
       goal_id: '',  // filled below
       title: row.o_title,
-      status: row.o_status,
+      status: row.o_status as OutcomeStatus,
       criteria_ids: [],
       priority: row.o_priority,
       version: 1,
@@ -114,7 +136,7 @@ export function findExpiredLeases(store: Store, now: Date = new Date()): Task[] 
     WHERE status = 'RUNNING'
       AND lease_until IS NOT NULL
       AND lease_until < ?
-  `).all(now.toISOString()) as Task[];
+  `).all(now.toISOString()) as unknown as Task[];
   return rows;
 }
 

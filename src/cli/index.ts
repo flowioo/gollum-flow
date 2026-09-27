@@ -39,8 +39,9 @@ import { validatePlan, type PlannedGoal } from '../workflow/planner.js';
 import { schedulerCommand } from './commands/scheduler.js';
 import { verifyByCriterion, verifyCommand, verifyGit } from '../mcp/core/verify.js';
 import { applyRecovery } from '../mcp/core/recover.js';
-import { taskGet } from '../mcp/core/task.js';
 import { goalAlign, handleMisaligned, handleUncertain } from '../mcp/core/goal-align.js';
+import { installCodex } from '../adapters/codex/installer.js';
+import { installClaude } from '../adapters/claude-code/installer.js';
 
 const program = new Command();
 program
@@ -589,6 +590,32 @@ program
       }
     }
     if (!result.ok) process.exit(1);
+  });
+
+// =============================================================================
+// install (Codex / Claude Code adapters)
+// =============================================================================
+
+const install = program.command('install').description('Install Gollum into an Agent Host');
+
+install
+  .command('codex')
+  .description('Install Gollum MCP server + skills into Codex CLI')
+  .action(() => {
+    const result = installCodex();
+    console.log(result.message);
+    for (const step of result.steps) console.log(`  ${step}`);
+    process.exit(result.ok ? 0 : 1);
+  });
+
+install
+  .command('claude')
+  .description('Install Gollum MCP server + skills into Claude Code')
+  .action(() => {
+    const result = installClaude();
+    console.log(result.message);
+    for (const step of result.steps) console.log(`  ${step}`);
+    process.exit(result.ok ? 0 : 1);
   });
 
 // =============================================================================

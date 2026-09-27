@@ -22,8 +22,8 @@
  *   仅在改变 Goal 边界、删除关键 Outcome、扩大 scope、不可逆操作、高风险操作时找人
  */
 
-import { type Store } from '../workflow/store/store.js';
-import type { Task, AlignmentVerdict, Outcome } from '../workflow/model/types.js';
+import { type Store } from '../../workflow/store/store.js';
+import type { Task, AlignmentVerdict, Outcome } from '../../workflow/model/types.js';
 import { outcomeRemainingGap, outcomeGet } from './outcome.js';
 
 // =============================================================================
