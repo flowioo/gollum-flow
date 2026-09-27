@@ -37,6 +37,9 @@ import {
 import { evidenceCreate, evidenceList } from '../mcp/core/evidence.js';
 import { validatePlan, type PlannedGoal } from '../workflow/planner.js';
 import { schedulerCommand } from './commands/scheduler.js';
+import { verifyByCriterion, verifyCommand, verifyGit } from '../mcp/core/verify.js';
+import { applyRecovery } from '../mcp/core/recover.js';
+import { taskGet } from '../mcp/core/task.js';
 
 const program = new Command();
 program
@@ -451,6 +454,84 @@ events
 // scheduler (sub-command group)
 // =============================================================================
 program.addCommand(schedulerCommand());
+
+// =============================================================================
+// verify (sub-command group)
+// =============================================================================
+
+const verify = program.command('verify').description('Run verification tools');
+
+verify
+  .command('command')
+  .description('Run a shell command verifier')
+  .requiredOption('-c, --command <cmd>', 'Command to run')
+  .option('--cwd <path>', 'Working directory')
+  .option('--timeout <ms>', 'Timeout in ms', (v) => parseInt(v, 10), 30000)
+  .option('--expect-exit <code>', 'Expected exit code', (v) => parseInt(v, 10), 0)
+  .action(async (opts) => {
+    const result = await verifyCommand({
+      command: opts.command,
+      cwd: opts.cwd,
+      timeout: opts.timeout,
+      expect: { exit_code: opts.expectExit },
+    });
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(result.ok ? 0 : 1);
+  });
+
+verify
+  .command('git')
+  .description('Run a git verifier')
+  .requiredOption('-t, --type <type>', 'status | diff | log')
+  .option('--repo <path>', 'Repo path')
+  .option('--expect-clean', 'Expect clean status')
+  .action(async (opts) => {
+    const result = await verifyGit({
+      type: opts.type,
+      repo: opts.repo,
+      expect: { clean: opts.expectClean },
+    });
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(result.ok ? 0 : 1);
+  });
+
+verify
+  .command('criterion <criterion_id>')
+  .description('Dispatch verifyByCriterion based on criterion.verifier.type')
+  .action(async (id) => {
+    const store = getStore();
+    const result = await verifyByCriterion(store, id);
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(result.ok ? 0 : 1);
+  });
+
+// =============================================================================
+// recover
+// =============================================================================
+
+program
+  .command('recover <task_id>')
+  .description('Apply recover Skill to a Task after a failure')
+  .requiredOption('--status <status>', 'Last verify status: PASS|FAIL|UNKNOWN')
+  .option('--error-type <type>', 'Error type from ToolResult.error')
+  .option('--observation <text>', 'Observation from last verify')
+  .action(async (id, opts) => {
+    const store = getStore();
+    const { task } = taskGet(store, id);
+    // Build a synthetic ToolResult from CLI input
+    const result = {
+      ok: opts.status === 'PASS',
+      status: opts.status as 'PASS' | 'FAIL' | 'UNKNOWN',
+      observation: opts.observation ?? '',
+      evidence: {},
+      error: opts.errorType
+        ? { type: opts.errorType, message: opts.observation ?? '', retryable: false }
+        : null,
+    };
+    const decision = applyRecovery(store, task, result);
+    console.log(JSON.stringify(decision, null, 2));
+    process.exit(decision.decision.action === 'block' ? 1 : 0);
+  });
 
 // =============================================================================
 // validate (Planner)
