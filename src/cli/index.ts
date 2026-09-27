@@ -40,6 +40,7 @@ import { schedulerCommand } from './commands/scheduler.js';
 import { verifyByCriterion, verifyCommand, verifyGit } from '../mcp/core/verify.js';
 import { applyRecovery } from '../mcp/core/recover.js';
 import { taskGet } from '../mcp/core/task.js';
+import { goalAlign, handleMisaligned, handleUncertain } from '../mcp/core/goal-align.js';
 
 const program = new Command();
 program
@@ -531,6 +532,35 @@ program
     const decision = applyRecovery(store, task, result);
     console.log(JSON.stringify(decision, null, 2));
     process.exit(decision.decision.action === 'block' ? 1 : 0);
+  });
+
+// =============================================================================
+// goal-align
+// =============================================================================
+
+program
+  .command('goal-align <task_id>')
+  .description('Run goal-align Skill on a Task (returns aligned|uncertain|misaligned)')
+  .option('--goal-description <desc>', 'Override Goal description')
+  .action((id, opts) => {
+    const store = getStore();
+    const result = goalAlign(store, {
+      task_id: id,
+      goal_description: opts.goalDescription,
+    });
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(result.verdict === 'misaligned' ? 2 : 0);
+  });
+
+program
+  .command('handle-misaligned <task_id>')
+  .description('Apply misaligned handler (pause + rollback, NOT escalate to Human)')
+  .requiredOption('-r, --reason <reason>', 'Misalignment reason')
+  .action((id, opts) => {
+    const store = getStore();
+    const { task } = taskGet(store, id);
+    const result = handleMisaligned(store, task, opts.reason);
+    console.log(JSON.stringify(result, null, 2));
   });
 
 // =============================================================================

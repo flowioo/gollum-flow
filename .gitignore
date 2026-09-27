@@ -52,4 +52,8 @@ repro.ts
 vitest.config.ts
 
 # Old test backups
-*.test.ts.bak*.db*
+*.test.ts.bak
+
+# Python
+__pycache__/
+*.pyc*.db*
