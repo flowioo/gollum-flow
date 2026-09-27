@@ -1,0 +1,29 @@
+# openclaw #114176 — diagnostic patch (NOT applied)
+#
+# Goal: surface ERR_INTERNAL_ASSERTION stack trace to stderr so it stops being silent.
+# Issue reports: "No stack trace is emitted, even with OPENCLAW_DEBUG=1."
+#
+# Suggested edit to src/agents/pi-embedded-runner/run/attempt.ts (around line 199):
+#
+#   - if (params.model.api !== "openai-completions") {
+#   -   return false;
+#   - }
+#   + try {
+#   +   if (params.model.api !== "openai-completions") {
+#   +     return false;
+#   +   }
+#   + } catch (err) {
+#   +   // Surface Node 22 ERR_INTERNAL_ASSERTION to stderr; issue #114176 reports silent failure.
+#   +   process.stderr.write(`[openclaw] shouldInjectOllamaCompatNumCtx threw: ${err && err.stack ? err.stack : err}\n`);
+#   +   throw err;
+#   + }
+#
+# This is a diagnostic patch, not a fix. Real fix requires:
+#   - Reproducing on Node 22.23.1 + llamacpp provider
+#   - Tracing dynamic import() vs require() ordering in pi-ai/@mariozechner/pi-ai
+#   - Reviewing the 4 previously-closed issues (#83035/#61958/#62691/#105110)
+#
+# Not applied because:
+#   - Patch is in /Users/qinchunxia/Documents/git-workspace/openclaw (outside gollum project)
+#   - openclaw's clawsweeper bot auto-rejects external PRs (clawsweeper-recovery-stuck label)
+#   - Risk of regression > value of stderr improvement without reproduction
