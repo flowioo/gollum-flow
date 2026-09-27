@@ -133,6 +133,55 @@ export async function githubGetIssue(args: GetIssueArgs): Promise<{ ok: boolean;
   }
 }
 
+export interface GetPrArgs {
+  owner: string;
+  repo: string;
+  pr_number: number;
+}
+
+export interface GitHubPr {
+  number: number;
+  title: string;
+  state: 'open' | 'closed';
+  merged: boolean;
+  html_url: string;
+  head_ref: string;
+  base_ref: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+  user: string | null;
+}
+
+export async function githubGetPr(args: GetPrArgs): Promise<{ ok: boolean; pr?: GitHubPr; error?: string }> {
+  const url = `${GH_API}/repos/${args.owner}/${args.repo}/pulls/${args.pr_number}`;
+  try {
+    const resp = await fetch(url, { headers: ghHeaders() });
+    if (!resp.ok) {
+      return { ok: false, error: `HTTP ${resp.status}: ${await resp.text()}` };
+    }
+    const pr = await resp.json() as any;
+    return {
+      ok: true,
+      pr: {
+        number: pr.number,
+        title: pr.title,
+        state: pr.state,
+        merged: !!pr.merged,
+        html_url: pr.html_url,
+        head_ref: pr.head?.ref ?? '',
+        base_ref: pr.base?.ref ?? '',
+        body: pr.body ?? '',
+        created_at: pr.created_at,
+        updated_at: pr.updated_at,
+        user: pr.user?.login ?? null,
+      },
+    };
+  } catch (e: any) {
+    return { ok: false, error: e.message ?? String(e) };
+  }
+}
+
 export interface CreatePrCompareArgs {
   owner: string;
   repo: string;

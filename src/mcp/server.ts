@@ -34,7 +34,7 @@ import { goalAlign } from './core/goal-align.js';
 import { schedulerTick } from '../workflow/scheduler/scheduler.js';
 import { projectGetOrCreateDefault } from './core/goal.js';
 import {
-  githubSearchIssues, githubGetIssue, githubCreatePrCompare,
+  githubSearchIssues, githubGetIssue, githubCreatePrCompare, githubGetPr,
   githubForkRepo, githubDetectLocalRepo,
 } from './core/github.js';
 
@@ -274,6 +274,19 @@ const TOOLS = [
     },
   },
   {
+    name: 'github.get_pr',
+    description: 'Fetch a single GitHub pull request by owner/repo/pr_number, returns full body + state + head/base.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string' },
+        repo: { type: 'string' },
+        pr_number: { type: 'number' },
+      },
+      required: ['owner', 'repo', 'pr_number'],
+    },
+  },
+  {
     name: 'github.create_pr_compare',
     description: 'Generate a compare URL for opening a PR. With GITHUB_TOKEN set, actually submits the PR via API. Without token, returns URL for user to click.',
     inputSchema: {
@@ -442,6 +455,8 @@ async function dispatchTool(name: string, args: any): Promise<unknown> {
       return githubSearchIssues(args);
     case 'github.get_issue':
       return githubGetIssue(args);
+    case 'github.get_pr':
+      return githubGetPr(args);
     case 'github.create_pr_compare':
       return githubCreatePrCompare(args);
     case 'github.fork_repo':
