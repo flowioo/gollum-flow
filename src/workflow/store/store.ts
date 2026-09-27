@@ -16,7 +16,8 @@
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { ulid } from 'ulid';
 import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 // =============================================================================
@@ -334,9 +335,16 @@ function resolveDefaultMigrationDir(): string {
   return candidates[0]!; // throw with the most informative path
 }
 
+function resolveDefaultDbPath(): string {
+  if (process.env.GOLLUM_DB_PATH) return process.env.GOLLUM_DB_PATH;
+  // Default: XDG_DATA_HOME-aware global location. Same DB from any cwd after install.
+  const xdg = process.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share');
+  return join(xdg, 'gollum', 'gollum.db');
+}
+
 export function getStore(): Store {
   if (!_store) {
-    const dbPath = process.env.GOLLUM_DB_PATH ?? './data/gollum.db';
+    const dbPath = resolveDefaultDbPath();
     const migrationDir =
       process.env.GOLLUM_MIGRATION_DIR ?? resolveDefaultMigrationDir();
     _store = new Store(resolve(dbPath), resolve(migrationDir));
