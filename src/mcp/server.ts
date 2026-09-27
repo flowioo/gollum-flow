@@ -33,6 +33,10 @@ import { verifyCommand } from './core/verify.js';
 import { goalAlign } from './core/goal-align.js';
 import { schedulerTick } from '../workflow/scheduler/scheduler.js';
 import { projectGetOrCreateDefault } from './core/goal.js';
+import {
+  githubSearchIssues, githubGetIssue, githubCreatePrCompare,
+  githubForkRepo, githubDetectLocalRepo,
+} from './core/github.js';
 
 // =============================================================================
 // Tool definitions (MCP format)
@@ -241,6 +245,73 @@ const TOOLS = [
       required: ['outcome_id', 'title'],
     },
   },
+  {
+    name: 'github.search_issues',
+    description: 'Search GitHub issues. Uses GITHUB_TOKEN env if set, else unauthenticated (rate-limited).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Free-text query (optional)' },
+        labels: { type: 'array', items: { type: 'string' }, description: 'e.g. ["good first issue", "bug"]' },
+        language: { type: 'string', description: 'e.g. typescript, python' },
+        state: { type: 'enum', enum: ['open', 'closed'], default: 'open' },
+        sort: { type: 'enum', enum: ['updated', 'created', 'comments'], default: 'updated' },
+        per_page: { type: 'number', default: 20 },
+      },
+    },
+  },
+  {
+    name: 'github.get_issue',
+    description: 'Fetch a single GitHub issue by owner/repo/number, returns full body.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string' },
+        repo: { type: 'string' },
+        issue_number: { type: 'number' },
+      },
+      required: ['owner', 'repo', 'issue_number'],
+    },
+  },
+  {
+    name: 'github.create_pr_compare',
+    description: 'Generate a compare URL for opening a PR. With GITHUB_TOKEN set, actually submits the PR via API. Without token, returns URL for user to click.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string' },
+        repo: { type: 'string' },
+        head: { type: 'string', description: 'head ref, e.g. "username:branch" or "username:fix/typo"' },
+        base: { type: 'string', description: 'base branch, e.g. "main"' },
+        title: { type: 'string' },
+        body: { type: 'string' },
+      },
+      required: ['owner', 'repo', 'head', 'base', 'title'],
+    },
+  },
+  {
+    name: 'github.fork_repo',
+    description: 'Fork a GitHub repo to the authenticated user (or an org). Requires GITHUB_TOKEN.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        owner: { type: 'string' },
+        repo: { type: 'string' },
+        org: { type: 'string' },
+      },
+      required: ['owner', 'repo'],
+    },
+  },
+  {
+    name: 'github.detect_local_repo',
+    description: 'Inspect a local git repo: parse origin, test SSH auth, return owner/repo/ssh_ok.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: 'Absolute path to local git repo (default: process.cwd())' },
+      },
+    },
+  },
 ];
 
 // =============================================================================
@@ -367,6 +438,16 @@ async function dispatchTool(name: string, args: any): Promise<unknown> {
         priority: args.priority,
       });
     }
+    case 'github.search_issues':
+      return githubSearchIssues(args);
+    case 'github.get_issue':
+      return githubGetIssue(args);
+    case 'github.create_pr_compare':
+      return githubCreatePrCompare(args);
+    case 'github.fork_repo':
+      return githubForkRepo(args);
+    case 'github.detect_local_repo':
+      return githubDetectLocalRepo(args.cwd ?? process.cwd());
     default:
       throw new Error(`unknown tool: ${name}`);
   }

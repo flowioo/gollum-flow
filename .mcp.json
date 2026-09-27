@@ -1,1 +1,13 @@
-{}
+{
+  "mcpServers": {
+    "gollum": {
+      "command": "node",
+      "args": [
+        "/Users/qinchunxia/lab/gollum/dist/mcp/server.js"
+      ],
+      "env": {
+        "GOLLUM_DB_PATH": "./data/gollum.db"
+      }
+    }
+  }
+}

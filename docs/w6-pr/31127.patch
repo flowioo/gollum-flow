@@ -1,0 +1,39 @@
+From 4b8cc6f32a4baba01a16a334cbca6b5c368954d9 Mon Sep 17 00:00:00 2001
+From: baiju <baiju@users.noreply.github.com>
+Date: Mon, 28 Sep 2026 01:33:52 +0800
+Subject: [PATCH] content: add new trivia question (goodbye)
+
+Closes #31127
+
+Adds the question: What is the Japanese word for "goodbye"?
+- correctIndex: 0 (Sayonara)
+- difficulty: easy
+- 4 options: Sayonara, Konnichiwa, Arigatou, Oyasumi
+---
+ community/content/japan-trivia-easy.json | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/community/content/japan-trivia-easy.json b/community/content/japan-trivia-easy.json
+index 310ed94..39b5bd9 100644
+--- a/community/content/japan-trivia-easy.json
++++ b/community/content/japan-trivia-easy.json
+@@ -559,5 +559,16 @@
+       "Kiku"
+     ],
+     "correctIndex": 0
++  },
++  {
++    "question": "What is the Japanese word for \"goodbye\"?",
++    "difficulty": "easy",
++    "answers": [
++      "Sayonara",
++      "Konnichiwa",
++      "Arigatou",
++      "Oyasumi"
++    ],
++    "correctIndex": 0
+   }
+ ]
+-- 
+2.39.3 (Apple Git-146)
+
