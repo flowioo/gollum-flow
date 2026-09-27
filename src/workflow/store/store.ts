@@ -17,6 +17,7 @@ import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { ulid } from 'ulid';
 import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // =============================================================================
 // Errors
@@ -316,11 +317,28 @@ function serializeValue(v: unknown): string | number | null {
 
 let _store: Store | null = null;
 
+// Resolve migrations relative to this module's location. When gollum is run via
+// `npm link` from any cwd, this points at the installed package's migrations
+// instead of the user's cwd (which would ENOENT). Falls back to a local
+// `./src/workflow/store/migrations` path when run in-place from the source repo.
+function resolveDefaultMigrationDir(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    resolve(here, 'migrations'),                              // dist/workflow/store/store.js → dist/workflow/store/migrations
+    resolve(here, '../../src/workflow/store/migrations'),    // src layout
+    resolve(process.cwd(), 'src/workflow/store/migrations'), // dev fallback (cwd = repo root)
+  ];
+  for (const c of candidates) {
+    if (existsSync(c)) return c;
+  }
+  return candidates[0]!; // throw with the most informative path
+}
+
 export function getStore(): Store {
   if (!_store) {
     const dbPath = process.env.GOLLUM_DB_PATH ?? './data/gollum.db';
     const migrationDir =
-      process.env.GOLLUM_MIGRATION_DIR ?? './src/workflow/store/migrations';
+      process.env.GOLLUM_MIGRATION_DIR ?? resolveDefaultMigrationDir();
     _store = new Store(resolve(dbPath), resolve(migrationDir));
   }
   return _store;

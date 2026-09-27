@@ -8,7 +8,7 @@
     "gollum": "./dist/cli/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && mkdir -p dist/workflow/store/migrations && cp src/workflow/store/migrations/*.sql dist/workflow/store/migrations/",
     "dev": "tsx src/cli/index.ts",
     "test": "tsx --test tests/*.test.ts",
     "test:watch": "tsx --test --watch tests/*.test.ts",
