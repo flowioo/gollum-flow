@@ -37,11 +37,15 @@ import {
 import { evidenceCreate, evidenceList } from '../mcp/core/evidence.js';
 import { validatePlan, type PlannedGoal } from '../workflow/planner.js';
 import { schedulerCommand } from './commands/scheduler.js';
+import { supervisorCommand } from './commands/supervisor.js';
+import { quotaCommand } from './commands/quota.js';
+import { heartbeatCommand } from './commands/heartbeat.js';
 import { verifyByCriterion, verifyCommand, verifyGit } from '../mcp/core/verify.js';
 import { applyRecovery } from '../mcp/core/recover.js';
 import { goalAlign, handleMisaligned, handleUncertain } from '../mcp/core/goal-align.js';
 import { installCodex } from '../adapters/codex/installer.js';
 import { installClaude } from '../adapters/claude-code/installer.js';
+import type { Outcome, Task } from '../workflow/model/types.js';
 
 const program = new Command();
 program
@@ -108,12 +112,50 @@ goal
   });
 goal
   .command('list')
-  .description('List goals')
+  .description('List goals (pass --tree for goal → outcome → task + criterion gap)')
   .option('-p, --project-id <id>', 'Filter by project')
+  .option('--tree', 'Show goal → outcome → task + criterion gap')
   .action((opts) => {
     const store = getStore();
     const list = goalList(store, { project_id: opts.projectId });
-    console.table(list.map((g) => ({ id: g.id, title: g.title, status: g.status })));
+    if (!opts.tree) {
+      console.table(list.map((g) => ({ id: g.id, title: g.title, status: g.status })));
+      return;
+    }
+    if (list.length === 0) {
+      console.log('(no goals)');
+      return;
+    }
+    for (const g of list) {
+      const outcomes = store.list<Outcome>('outcomes', 'goal_id = ?', [g.id]);
+      console.log(`● ${g.id}  ${g.title}  [${g.status}]`);
+      if (outcomes.length === 0) {
+        console.log('  └─ (no outcomes)');
+        console.log('');
+        continue;
+      }
+      for (let i = 0; i < outcomes.length; i++) {
+        const o = outcomes[i]!;
+        const isLastOutcome = i === outcomes.length - 1;
+        const branch = isLastOutcome ? '└─' : '├─';
+        const pad = isLastOutcome ? '   ' : '│  ';
+        const gap = outcomeRemainingGap(store, o.id);
+        console.log(
+          `  ${branch} ${o.id}  ${o.title}  [${o.status}]  crit=${gap.pass}/${gap.total}`,
+        );
+        const tasks = store.list<Task>('tasks', 'outcome_id = ?', [o.id]);
+        if (tasks.length === 0) {
+          console.log(`  ${pad}  └─ (no tasks)`);
+          continue;
+        }
+        for (let j = 0; j < tasks.length; j++) {
+          const t = tasks[j]!;
+          const tBranch = j === tasks.length - 1 ? '└─' : '├─';
+          console.log(`  ${pad}  ${tBranch} ${t.id}  ${t.title}  [${t.status}]`);
+        }
+      }
+      console.log('');
+    }
   });
 goal
   .command('show <goal_id>')
@@ -255,6 +297,46 @@ criterion
 // task
 // =============================================================================
 const task = program.command('task').description('Manage tasks');
+task
+  .command('list')
+  .description('List tasks (filter by --outcome / --status)')
+  .option('-o, --outcome-id <id>', 'Filter by outcome ID')
+  .option('-s, --status <status>', 'Filter by status (PENDING|RUNNING|WAITING|BLOCKED|VERIFYING|RECOVERING|DONE|FAILED)')
+  .option('-l, --limit <n>', 'Limit', (v) => parseInt(v, 10), 50)
+  .action((opts) => {
+    const store = getStore();
+    const conds: string[] = [];
+    const params: unknown[] = [];
+    if (opts.outcomeId) {
+      conds.push('outcome_id = ?');
+      params.push(opts.outcomeId);
+    }
+    if (opts.status) {
+      conds.push('status = ?');
+      params.push(opts.status);
+    }
+    const where = conds.length ? conds.join(' AND ') : '1';
+    const rows = store.list<{ id: string; outcome_id: string; title: string; status: string; priority: number; retry_count: number; owner: string | null; lease_until: string | null }>(
+      'tasks',
+      `${where} ORDER BY priority DESC, created_at ASC LIMIT ?`,
+      [...params, opts.limit],
+    );
+    if (rows.length === 0) {
+      console.log('(no tasks match)');
+      return;
+    }
+    console.table(
+      rows.map((t) => ({
+        id: t.id,
+        status: t.status,
+        priority: t.priority,
+        retry: t.retry_count,
+        owner: t.owner ?? '-',
+        lease_until: t.lease_until ? t.lease_until.slice(11, 19) : '-',
+        title: t.title.slice(0, 60),
+      })),
+    );
+  });
 task
   .command('create')
   .description('Create a new task (must belong to an outcome)')
@@ -458,6 +540,21 @@ events
 program.addCommand(schedulerCommand());
 
 // =============================================================================
+// supervisor (sub-command group) — 24/7 self-evolution layer
+// =============================================================================
+program.addCommand(supervisorCommand());
+
+// =============================================================================
+// quota (sub-command group) — API quota detection + 5hr recovery
+// =============================================================================
+program.addCommand(quotaCommand());
+
+// =============================================================================
+// heartbeat (sub-command group) — task + supervisor heartbeat watchdog
+// =============================================================================
+program.addCommand(heartbeatCommand());
+
+// =============================================================================
 // verify (sub-command group)
 // =============================================================================
 
@@ -613,6 +710,112 @@ install
   .description('Install Gollum MCP server + skills into Claude Code')
   .action(() => {
     const result = installClaude();
+    console.log(result.message);
+    for (const step of result.steps) console.log(`  ${step}`);
+    process.exit(result.ok ? 0 : 1);
+  });
+
+// =============================================================================
+// V0.2 — resolver subcommand (for gollum-resolver thin wrapper)
+// =============================================================================
+const resolver = program.command('resolver').description('Project resolution (used by shell hooks)');
+
+resolver
+  .command('notify-cwd <cwd>')
+  .description('Notify Gollum of cwd change; returns current project_id')
+  .action(async (cwd: string) => {
+    const { resolveProject } = await import('../workflow/resolver.js');
+    const result = await resolveProject(cwd);
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+resolver
+  .command('current')
+  .description('Print the currently bound project (from cached registry)')
+  .action(async () => {
+    const { currentProject } = await import('../workflow/resolver.js');
+    const result = await currentProject();
+    console.log(result ? JSON.stringify(result, null, 2) : '(no current project)');
+  });
+
+resolver
+  .command('list')
+  .description('List all known projects in ~/.gollum/registry.yaml')
+  .action(async () => {
+    const { listProjects } = await import('../workflow/resolver.js');
+    const projects = await listProjects();
+    for (const p of projects) {
+      console.log(`${p.project_id}\t${p.name}\t${p.repo_root}`);
+    }
+  });
+
+// =============================================================================
+// V0.2 — store subcommand (for gollum-store thin wrapper)
+// =============================================================================
+const store = program.command('store').description('Low-level state store operations');
+
+store
+  .command('health')
+  .description('Check store connectivity')
+  .action(async () => {
+    try {
+      const s = await getStore();
+      const projects = s.list('projects');
+      const goals = s.list('goals');
+      console.log(JSON.stringify({ healthy: true, projects: projects.length, goals: goals.length }, null, 2));
+    } catch (e) {
+      console.log(JSON.stringify({ healthy: false, error: (e as Error).message }, null, 2));
+      process.exit(1);
+    }
+  });
+
+store
+  .command('info')
+  .description('Print store location and stats')
+  .action(async () => {
+    try {
+      const s = await getStore();
+      const projects = s.list('projects');
+      const goals = s.list('goals');
+      const outcomes = s.list('outcomes');
+      const tasks = s.list('tasks');
+      console.log(JSON.stringify({
+        stats: {
+          projects: projects.length,
+          goals: goals.length,
+          outcomes: outcomes.length,
+          tasks: tasks.length,
+        },
+      }, null, 2));
+    } catch (e) {
+      console.log(JSON.stringify({ error: (e as Error).message }, null, 2));
+      process.exit(1);
+    }
+  });
+
+// =============================================================================
+// V0.2 — doctor (self-check)
+// =============================================================================
+program
+  .command('doctor')
+  .description('Self-check: runtime, store, agents, skills, project registry')
+  .action(async () => {
+    const { runDoctor } = await import('./commands/doctor.js');
+    const report = await runDoctor();
+    process.exit(report.ok ? 0 : 1);
+  });
+
+// =============================================================================
+// V0.2 — install-skills (link bundled skills to detected agent dirs)
+// =============================================================================
+program
+  .command('install-skills')
+  .description('Symlink bundled Gollum skills into detected coding agent skills dirs')
+  .option('-g, --global', 'install into global agent skills dirs (default)')
+  .option('-a, --agent <name>', 'target a specific agent (claude-code, codex, cursor, mavis)')
+  .action(async (opts: { global?: boolean; agent?: string }) => {
+    const { installSkills } = await import('./commands/install-skills.js');
+    const result = await installSkills({ global: opts.global ?? true, agent: opts.agent });
     console.log(result.message);
     for (const step of result.steps) console.log(`  ${step}`);
     process.exit(result.ok ? 0 : 1);

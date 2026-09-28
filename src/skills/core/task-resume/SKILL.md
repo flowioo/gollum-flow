@@ -1,4 +1,12 @@
-# task-resume
+---
+name: gollum-task-run-resume
+description: |
+  Resume a Gollum Task across sessions. Use when restarting after the Host
+  (Codex / Claude Code / Mavis) was killed or restarted. Does NOT depend on
+  the underlying harness's session restore — only on Gollum's persisted state.
+---
+
+# gollum-task-run-resume
 
 ## Goal
 

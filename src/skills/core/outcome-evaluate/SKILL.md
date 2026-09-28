@@ -1,4 +1,12 @@
-# outcome-evaluate
+---
+name: gollum-outcome-evaluate
+description: |
+  Evaluate an Outcome's current state: compute remaining_gap (which criteria
+  are still unverified), and recommend the next concrete action
+  (continue / split / replan / pause).
+---
+
+# gollum-outcome-evaluate
 
 ## Goal
 

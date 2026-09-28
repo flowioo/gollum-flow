@@ -1,4 +1,12 @@
-# task-run
+---
+name: gollum-task-run
+description: |
+  Run a new Gollum Task end-to-end: claim → execute → verify → complete or fail.
+  Use when the scheduler hands you a PENDING task. Do NOT use for cross-session
+  recovery (use gollum-task-run-resume instead).
+---
+
+# gollum-task-run
 
 ## Goal
 

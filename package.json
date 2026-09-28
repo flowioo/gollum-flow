@@ -1,19 +1,40 @@
 {
   "name": "gollum",
-  "version": "0.1.0",
-  "description": "Portable workflow, skills and tools for reliable long-running coding agents",
+  "version": "0.2.0",
+  "description": "Agent distro for long-running coding agents — Goal / Outcome / Task / Evidence / Checkpoint state layer with portable skills and tools.",
   "type": "module",
-  "private": true,
   "bin": {
-    "gollum": "./dist/cli/index.js"
+    "gollum": "./dist/cli/index.js",
+    "gollum-resolver": "./dist/cli/gollum-resolver.js",
+    "gollum-store": "./dist/cli/gollum-store.js"
   },
+  "files": [
+    "dist",
+    "skills",
+    "templates",
+    "README.md"
+  ],
+  "keywords": [
+    "agent-distro",
+    "coding-agent",
+    "claude-code",
+    "codex",
+    "mavis",
+    "skills",
+    "goal-alignment",
+    "checkpoint",
+    "evidence",
+    "workflow"
+  ],
   "scripts": {
-    "build": "tsc && mkdir -p dist/workflow/store/migrations && cp src/workflow/store/migrations/*.sql dist/workflow/store/migrations/",
+    "build": "tsc && mkdir -p dist/workflow/store/migrations && cp src/workflow/store/migrations/*.sql dist/workflow/store/migrations/ && rm -rf dist/skills && cp -r src/skills dist/skills && rm -rf dist/templates && cp -r src/templates dist/templates 2>/dev/null || true",
     "dev": "tsx src/cli/index.ts",
     "test": "tsx --test tests/*.test.ts",
     "test:watch": "tsx --test --watch tests/*.test.ts",
     "lint": "eslint src --ext .ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm test",
+    "postinstall": "node ./dist/hooks/postinstall.js || node -e \"console.log('gollum installed. Run: gollum doctor')\""
   },
   "dependencies": {
     "commander": "^12.0.0",
@@ -29,5 +50,8 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

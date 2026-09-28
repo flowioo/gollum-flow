@@ -1,4 +1,12 @@
-# verify
+---
+name: gollum-verify
+description: |
+  Verify a task outcome using one of the whitelisted verifier types
+  (unit_test, integration_test, build_pass, user_acceptance, static_check,
+  artifact_exists). Turns hypotheses into evidence-backed facts.
+---
+
+# gollum-verify
 
 ## Goal
 

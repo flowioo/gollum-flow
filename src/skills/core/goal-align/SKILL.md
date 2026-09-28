@@ -1,4 +1,13 @@
-# goal-align
+---
+name: gollum-goal-align
+description: |
+  Decide whether the current Outcome still serves the Goal, and whether the
+  current Task is still worth continuing. Returns ALIGNED / UNCERTAIN /
+  MISALIGNED, with rationale. Run before committing major work or when the
+  user changes direction.
+---
+
+# gollum-goal-align
 
 ## Goal
 

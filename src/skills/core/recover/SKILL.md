@@ -1,4 +1,12 @@
-# recover
+---
+name: gollum-recover
+description: |
+  Systematically recover from a failed task without infinite retries.
+  Classifies failure, decides action (retry / change strategy / block / abort),
+  applies the action, and emits a decision event.
+---
+
+# gollum-recover
 
 ## Goal
 
