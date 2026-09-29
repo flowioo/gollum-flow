@@ -113,9 +113,25 @@ Every command and flag these skills name is checked against the real CLI by
 ```
 
 The `gollum-fix-issue` skill runs the whole loop: search issues across GitHub →
-plan the fix as Goal/Outcome/Task → reproduce the bug on a branch → implement →
-run the real verification command → attach evidence → push to a fork → open a
-**draft** PR → stop and report.
+score how clear the issue actually is → **show you the plan and wait for
+confirmation** → reproduce the bug on a branch → implement → run the real
+verification command → attach evidence → push to a fork → open a **draft** PR →
+stop and report.
+
+Two gates make it safe to run unattended:
+
+- **Nothing is written to the store before you confirm.** `gollum goal` has
+  create/list/show and no `delete`, so a Goal created without asking is
+  permanent. The agent shows the Goal / Outcome / Criterion / Task plan and
+  waits.
+- **Clarity is scored before work starts.** Five dimensions (reproduction,
+  expected-vs-actual, location hints, acceptance criteria, scope), 0–5. At 4–5
+  it proceeds to the confirmation gate; at 2–3 it must ask; at 0–1 it stops
+  rather than guessing a direction into the state layer.
+
+If you don't answer in time it does not stall and does not guess: it runs a
+read-only exploration, and if that cannot pin the root cause it reverts
+(`git reset --hard` to baseline), marks the task FAILED, and says so.
 
 It never opens a ready-for-review PR on its own, and never opens one without
 having actually run the verification.
@@ -165,7 +181,7 @@ gollum recover <task_id>
 
 ```bash
 npm run typecheck
-npm test                      # 158 tests
+npm test                      # 164 tests
 npm run build
 bash tests/_v02_install_e2e.sh            # install E2E (isolated HOME, includes Claude)
 GOLLUM_E2E_SKIP_CLAUDE=1 bash tests/_v02_install_e2e.sh   # skip the Claude step

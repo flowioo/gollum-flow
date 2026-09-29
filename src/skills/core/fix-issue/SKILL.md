@@ -37,11 +37,14 @@ description: |
 
 | 情况 | 怎么办 |
 |---|---|
-| issue 描述含糊、复现步骤不全 | 停下问，别猜着改 |
+| **清晰度 ≤ 3（见 Phase 1）** | 停下问，别猜着改 |
 | 要改核心 API / 破坏性变更 | 停下问 |
 | 搜出来 5 个候选 issue | 列出编号让人挑，**别自己挑** |
 | 改了 30 分钟还没定位到根因 | `gollum task fail` + `gollum recover`，别硬扛 |
 | 验证跑不过 | 同上，**不要**开 PR |
+
+**用户迟迟不回应**不是继续干等的理由。按 `autoresearch` 的思路：**先自主探索，
+不行就回退。** 见下面 Phase 4。
 
 ---
 
@@ -77,7 +80,59 @@ gollum github issue "$REPO" "$NUMBER"
 
 `$REPO` 形如 `cli/cli`。**必须读全文**——标题党很多，body 里才有复现步骤。
 
-### 3. 落成 Goal → Outcome → Task
+### Phase 1 — 清晰度打分（读完 issue 立刻做）
+
+**读完 issue 全文、动手之前**，先按 `gollum-plan` 的 5 项标准打分（复现 / 期望vs实际 /
+定位线索 / 验收标准 / 范围），每项 0 或 1：
+
+| 得分 | 结论 | 怎么做 |
+|---|---|---|
+| 4–5 | 明确 | 进 Phase 2，仍要先确认方案 |
+| 2–3 | 模糊 | **必须先问** |
+| 0–1 | 不明确 | 停下，别猜 |
+
+把分数和缺项报给用户：
+
+```text
+issue 清晰度 3/5 — 缺：验收标准、改动范围
+```
+
+同时检查 issue 是不是仍然可领取：已被 assign 或有进行中的 PR 就别去抢。
+
+### Phase 2 — 出方案给用户确认（不落库）
+
+**一条 `gollum goal create` 都不许执行。** 先把方案写出来给用户看：
+
+```text
+issue:   <url>  清晰度 4/5
+打算这样修，确认吗？
+
+Goal     修复 <repo>#<n>：<title>
+Outcome  <可验证的结果>
+  └ criterion  <怎么验证>  ← 跑：<真实命令>
+  └ Task 1  <一个最小动作>（<N>min）
+      验收：<可判定的条件>
+
+改动面：<会碰哪些文件>
+```
+
+拿到确认才落库。`gollum goal` 没有 delete——**建错了删不掉**，这是要确认的根本原因。
+
+### Phase 3 — baseline：先复现，再动手
+
+这是 `autoresearch` 的核心：**动手前必须先测出基线**，否则你不知道改动有没有用。
+
+```bash
+git checkout -b fix/$NUMBER-...
+<复现命令>            # 必须真的失败一次
+```
+
+**没见过失败就不算定位到问题。** 跑不出来 = issue 描述不全或已过时，
+这时候按 Phase 4 走，不要硬改。
+
+基线结果记下来，后面每次改动都跟它比。
+
+### Phase 3.5 — 落库（确认之后才做）
 
 按 `gollum-plan` 的流程建，来源写清是哪个 issue：
 
@@ -106,25 +161,68 @@ TASK_ID=$(gollum task create -o "$OUTCOME_ID" \
 
 `--estimated-minutes` 超 30 会被 `gollum validate` 判错，必须拆。
 
-### 4. 先复现，再改
-
 ```bash
 gollum task claim "$TASK_ID" -o claude/issue-$NUMBER
 ```
 
-**先写一个能复现 issue 的失败用例/命令，跑一遍看到它失败。** 没见过失败就不算定位到问题。
 每到一个可恢复的里程碑就存 checkpoint：
 
 ```bash
 gollum task checkpoint "$TASK_ID" \
-  -s "已复现：<触发条件>" -o "<观察到的现象>" --next-action "<下一步>"
+  -s "基线：<复现失败的表现>" -o "<观察>" --next-action "<下一步>"
 ```
 
-### 5. 实现
+## Phase 4 — 自主探索循环（用户没回应时）
+
+`autoresearch` 的做法：**循环一旦启动就自主跑，不再打断用户问"要不要继续"，
+但每次尝试都先 commit，改坏了能干净回退。**
+
+```text
+循环体：
+  1. 提一个假设（"是 X 的拼写错了"）
+  2. 改代码，改动尽量小
+  3. git add -A && git commit -m "attempt: <假设>"   ← 先 commit，才能干净回退
+  4. 跑校验命令
+  5. 比对基线：
+       变好 → 记下 commit hash，进入下一次尝试
+       没变好或更糟 → git reset --hard <上一个好 hash>，记录失败原因，换个假设
+  6. 循环 3 次仍没进展 → 停下来报告
+```
+
+要点：
+
+- **每次尝试都先 commit**，否则 `git reset` 回退不干净。
+- **单一指标**：就用 Phase 3 定的那个校验命令，不要一边跑一边换标准。
+- **不要越界**：不改 `autoresearch` 意义上的"基础设施文件"（本 skill 指
+  `CONTRIBUTING.md` 要求的规范文件、CI 配置、依赖清单），除非 issue 明确要求。
+- **保留一份尝试记录**（TSV 或直接记在 checkpoint 里）：
+
+  | # | 假设 | 校验结果 | 处置 |
+  |---|---|---|---|
+  | 0 | 基线 | 失败 | — |
+  | 1 | cli.py 拼写错误 | 通过 | 保留 |
+  | 2 | 改 README | 无变化 | 回退 |
+
+### 循环也定位不到根因 → 回退
+
+```bash
+git reset --hard <基线 commit>
+gollum task fail "$TASK_ID" -r "3 次尝试均未定位根因：<结论>"
+gollum recover "$TASK_ID"
+```
+
+然后如实告诉用户：**信息不足，定位不到，没能修。**
+
+**不要**为了"有个结果"而硬凑一个改动开 PR——那比承认失败更糟。
+注意 `gollum goal` 没有 delete，已经落库的 Goal 会留在那里，这是确认闸门存在的原因。
+
+## Phase 5 — 落定改动
+
+### 5.1 实现
 
 改代码。`gollum` 不管你写代码，它只管状态；改法遵循仓库自己的规范（先读 `AGENTS.md` / `CONTRIBUTING.md`）。
 
-### 6. 真跑验证
+### 5.2 真跑验证
 
 ```bash
 <那条会失败的复现命令>     # 现在应该通过
@@ -133,14 +231,14 @@ gollum verify criterion "$CRITERION_ID"
 
 命令退出码非 0 就**停下**，不要开 PR。仓库自带的完整校验也要跑（如 `npm test`、`pytest`）。
 
-### 7. 写 evidence
+### 5.3 写 evidence
 
 ```bash
 gollum evidence create -c "$CRITERION_ID" --status PASS \
   --executor claude/issue-$NUMBER --data '{"command":"<校验命令>","exit_code":0}'
 ```
 
-### 8. Fork + 分支 + 提交 + 推送
+### 5.4 Fork + 分支 + 提交 + 推送
 
 ```bash
 gollum github repo                 # 确认 owner/repo 和 ssh
@@ -155,7 +253,7 @@ Closes #$NUMBER"
 git push -u "fork/$BRANCH" "$BRANCH"
 ```
 
-### 9. 开 DRAFT PR，然后停下
+### 5.5 开 DRAFT PR，然后停下
 
 用 `gh` 而不是 `gollum github pr`——`gh` 能自动处理 fork 跨仓的 head 分支：
 
@@ -189,7 +287,7 @@ Issue:  <issue url>
 
 **不要自动 `gh pr ready`。** 用户确认后才转。
 
-### 10. 收工入库
+### 5.6 收工入库
 
 ```bash
 gollum task complete "$TASK_ID" -s "已修复并提交 draft PR <url>"
@@ -200,6 +298,8 @@ gollum goal list --tree
 
 ## Anti-Patterns
 
+- ❌ **没确认就 `gollum goal create`** —— goal 删不掉，这是最贵的错
+- ❌ **不打清晰度分就开始** —— 模糊需求建出来的 Goal 会把错误方向固化
 - ❌ 没跑验证就开 PR —— 这是最严重的
 - ❌ 复现步骤靠猜，不实际跑一遍
 - ❌ 直接 push 到别人的仓库（要推 fork）
@@ -207,6 +307,8 @@ gollum goal list --tree
 - ❌ issue 有多个候选时自己挑一个就开始改
 - ❌ 改了代码但没 `gollum task complete`，状态烂尾
 - ❌ 改完发现验证不过就硬开 PR
+- ❌ 循环里不 commit 就改——`git reset` 回退不干净
+- ❌ 为了"有结果"硬凑一个改动 —— 定位不到就如实说定位不到
 
 ## 失败处理
 
@@ -217,7 +319,20 @@ gollum recover "$TASK_ID"     # retry / change_strategy / block
 
 `recover` 连续 5 次仍 block 就停下找用户，不要无限重试。
 
+代码层面的回退是 `git reset --hard <基线 commit>`，不是 `gollum` 的职责——
+`gollum` 只管状态，代码归 git。
+
 ## 收尾检查清单
+
+流程闸门：
+
+- [ ] 读过 issue 全文并打过清晰度分（分数已报给用户）
+- [ ] 清晰度 ≤ 3 时**问过**用户
+- [ ] **建库前**把方案给用户确认过
+- [ ] 先跑出失败基线才动的手
+- [ ] 用户没回应时走了探索/回退，而不是干等
+
+产出：
 
 - [ ] `gollum verify criterion` 通过
 - [ ] evidence 已写入且 status=PASS

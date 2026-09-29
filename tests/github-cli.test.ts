@@ -190,3 +190,86 @@ test('the fix-issue skill extracts exactly one ULID per id', () => {
     assert.ok(m[1], `ULID extraction is missing "| head -1": ${m[0]}`);
   }
 });
+
+// --- the confirmation gate -------------------------------------------------
+// A real session created a Goal with no confirmation and no plan preview: the
+// agent searched, asked which issue, cloned the repo, and only then created the
+// Goal — the user saw a clone and some greps and concluded "it never made a
+// goal, it just started editing". `gollum goal` has create/list/show and no
+// delete, so a Goal created without asking is permanent.
+//
+// These assertions are deliberately about ordering and required text, not about
+// prose quality: the gate is only real if it is written down.
+
+const SKILL_DIR = join(ROOT, 'src', 'skills', 'core');
+
+function skillBody(name: string): string {
+  return readFileSync(join(SKILL_DIR, name, 'SKILL.md'), 'utf-8');
+}
+
+test('every goal-creating skill has a clarity score', () => {
+  for (const s of ['plan', 'fix-issue']) {
+    const md = skillBody(s);
+    assert.match(md, /清晰度/, `${s} does not score how clear the request is`);
+    assert.match(md, /4[–-]5/, `${s} has no "clear" band`);
+    assert.match(md, /2[–-]3/, `${s} has no "vague" band`);
+    assert.match(md, /0[–-]1/, `${s} has no "unclear" band`);
+  }
+});
+
+test('every goal-creating skill gates goal creation on user confirmation', () => {
+  for (const s of ['plan', 'fix-issue']) {
+    const md = skillBody(s);
+    assert.match(
+      md,
+      /确认/,
+      `${s} never mentions confirming the plan with the user`,
+    );
+    // The gate has to be stated as a prohibition, not just a suggestion.
+    assert.match(
+      md,
+      /确认前[^。\n]*不(?:落库|执行)|不要在用户确认前|不落库/,
+      `${s} does not state that nothing may be created before confirmation`,
+    );
+  }
+});
+
+test('the confirmation gate explains that goals cannot be deleted', () => {
+  // This is the reason the gate exists; if gollum ever grows `goal delete`,
+  // this test should be revisited rather than left to rot.
+  for (const s of ['plan', 'fix-issue']) {
+    assert.match(
+      skillBody(s),
+      /没有 ?delete|删不掉/,
+      `${s} does not explain why confirmation is required (no goal delete)`,
+    );
+  }
+});
+
+test('plan scores five concrete dimensions, not a vibe', () => {
+  const md = skillBody('plan');
+  for (const dim of ['复现', '期望', '定位线索', '验收标准', '范围']) {
+    assert.ok(md.includes(dim), `the clarity rubric is missing the "${dim}" dimension`);
+  }
+});
+
+test('fix-issue documents the autoresearch loop: baseline, commit-then-try, revert', () => {
+  const md = skillBody('fix-issue');
+  assert.match(md, /baseline|基线/i, 'no baseline step — you cannot tell if a change helped');
+  // The revert is only clean if every attempt is committed first.
+  const commitIdx = md.search(/git add -A && git commit/);
+  const resetIdx = md.search(/git reset --hard/);
+  assert.ok(commitIdx > -1, 'no "commit each attempt" step, so git reset cannot revert cleanly');
+  assert.ok(resetIdx > -1, 'no git reset rollback step');
+  assert.ok(
+    commitIdx < resetIdx,
+    'rollback is described before the commit step; a revert needs something to revert to',
+  );
+});
+
+test('fix-issue says what to do when the user does not answer', () => {
+  const md = skillBody('fix-issue');
+  assert.match(md, /没(?:有)?回应|没回|迟迟不/, 'does not handle a non-responsive user');
+  assert.match(md, /探索/, 'no autonomous exploration fallback');
+  assert.match(md, /回退/, 'no rollback fallback');
+});
