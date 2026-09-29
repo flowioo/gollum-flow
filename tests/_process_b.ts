@@ -11,8 +11,8 @@ import {
   schedulerTick,
   findExpiredLeases,
 } from '../src/workflow/scheduler/scheduler.js';
-import { outcomeGet, outcomeRemainingGap } from '../src/mcp/core/outcome.js';
-import { taskGet } from '../src/mcp/core/task.js';
+import { outcomeGet, outcomeRemainingGap } from '../src/core/outcome.js';
+import { taskGet } from '../src/core/task.js';
 
 const dbPath = process.env.GOLLUM_DB_PATH;
 if (!dbPath) {

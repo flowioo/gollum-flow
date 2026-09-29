@@ -13,7 +13,7 @@
 
 import type { Store } from '../store/store.js';
 import type { Task, Outcome, OutcomeStatus, AlignmentVerdict, TaskStatus } from '../model/types.js';
-import { outcomeRemainingGap } from '../../mcp/core/outcome.js';
+import { outcomeRemainingGap } from '../../core/outcome.js';
 
 // =============================================================================
 // Core scheduler

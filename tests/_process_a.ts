@@ -4,10 +4,10 @@
  * Then "crashes" (exits).
  */
 import { Store } from '../src/workflow/store/store.js';
-import { projectCreate, goalCreate } from '../src/mcp/core/goal.js';
-import { outcomeCreate } from '../src/mcp/core/outcome.js';
-import { criterionCreate } from '../src/mcp/core/criterion.js';
-import { taskCreate, taskClaim, taskCheckpoint } from '../src/mcp/core/task.js';
+import { projectCreate, goalCreate } from '../src/core/goal.js';
+import { outcomeCreate } from '../src/core/outcome.js';
+import { criterionCreate } from '../src/core/criterion.js';
+import { taskCreate, taskClaim, taskCheckpoint } from '../src/core/task.js';
 
 const dbPath = process.env.GOLLUM_DB_PATH;
 if (!dbPath) {

@@ -2,22 +2,25 @@
  * Codex CLI Adapter (DESIGN §10 / §24)
  *
  * Installer:
- *   1. Register Gollum MCP server in Codex config.toml
- *   2. Copy Gollum Skills to Codex skill directory
- *   3. Provide startup params (--task-id + goal context)
+ *   1. Link the bundled skills into Codex's skills directory
+ *   2. Do NOT register an MCP server — the CLI is the supported interface
  *
  * Usage:
  *   gollum install codex
  *
- * After install, Codex can:
- *   - Spawn Gollum MCP server as stdio subprocess
- *   - Discover 16 tools via tools/list
- *   - Call task.get / task.claim / task.checkpoint / verify.* / goal-align ...
+ * Why no MCP: every workflow operation is available through the `gollum` CLI and
+ * the skills are written against it. The previous version appended an
+ * [mcp_servers.gollum] block to ~/.codex/config.toml that pinned
+ * GOLLUM_DB_PATH to ./data/gollum.db, so anything Codex created was invisible
+ * to the CLI. That block is not written any more.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, symlinkSync, lstatSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // =============================================================================
 // Config paths
@@ -26,32 +29,8 @@ import { homedir } from 'node:os';
 export interface CodexPaths {
   configFile: string;   // ~/.codex/config.toml
   skillsDir: string;    // ~/.codex/skills
-  mcpServerName: string; // "gollum"
-  mcpCommand: string;   // absolute path to dist/mcp/server.js
+  detectDir: string;    // ~/.codex
 }
-
-export function detectCodexPaths(): CodexPaths {
-  const home = homedir();
-  const configFile = process.env.CODEX_CONFIG ?? join(home, '.codex', 'config.toml');
-  const skillsDir = process.env.CODEX_SKILLS_DIR ?? join(home, '.codex', 'skills');
-
-  // mcpCommand = absolute path to compiled gollum-mcp entry
-  // We assume the CLI entry will be at <project>/dist/cli/index.js
-  // and the MCP server lives at <project>/dist/mcp/server.js
-  const projectRoot = process.cwd();
-  const mcpCommand = resolve(join(projectRoot, 'dist', 'mcp', 'server.js'));
-
-  return {
-    configFile,
-    skillsDir,
-    mcpServerName: 'gollum',
-    mcpCommand,
-  };
-}
-
-// =============================================================================
-// Install MCP server in Codex config.toml
-// =============================================================================
 
 export interface InstallResult {
   ok: boolean;
@@ -59,81 +38,69 @@ export interface InstallResult {
   steps: string[];
 }
 
-/**
- * Parse existing Codex config.toml (or create new).
- * V0.1: simple string-based TOML manipulation (no TOML parser dep).
- *
- * Strategy: append a new [mcp_servers.gollum] section if absent.
- * Idempotent: if already installed, no-op.
- */
-export function installCodexMcpServer(paths: CodexPaths): InstallResult {
-  const steps: string[] = [];
+export function detectCodexPaths(): CodexPaths {
+  const home = homedir() ?? '';
+  return {
+    configFile: process.env.CODEX_CONFIG ?? join(home, '.codex', 'config.toml'),
+    skillsDir: process.env.CODEX_SKILLS_DIR ?? join(home, '.codex', 'skills'),
+    detectDir: process.env.CODEX_HOME ?? join(home, '.codex'),
+  };
+}
 
-  if (!existsSync(dirname(paths.configFile))) {
-    mkdirSync(dirname(paths.configFile), { recursive: true });
+/** dist/adapters/codex/installer.js → dist/skills */
+function bundledSkillsDir(): string {
+  return resolve(__dirname, '..', '..', 'skills', 'core');
+}
+
+function findSkills(root: string): { name: string; dir: string }[] {
+  if (!existsSync(root)) return [];
+  const out: { name: string; dir: string }[] = [];
+  for (const ent of readdirSync(root, { withFileTypes: true })) {
+    if (!ent.isDirectory()) continue;
+    const sub = join(root, ent.name);
+    if (existsSync(join(sub, 'SKILL.md'))) out.push({ name: ent.name, dir: sub });
+    else out.push(...findSkills(sub));
   }
-
-  let content = '';
-  if (existsSync(paths.configFile)) {
-    content = readFileSync(paths.configFile, 'utf-8');
-  }
-
-  if (content.includes('[mcp_servers.gollum]')) {
-    steps.push(`MCP server "${paths.mcpServerName}" already registered in ${paths.configFile}`);
-    return { ok: true, message: 'already installed', steps };
-  }
-
-  const block = `\n# Added by gollum install codex
-[mcp_servers.${paths.mcpServerName}]
-command = "${paths.mcpCommand}"
-args = []
-env = { "GOLLUM_DB_PATH" = "${process.env.GOLLUM_DB_PATH ?? './data/gollum.db'}" }
-enabled = true
-`;
-  appendFileSync(paths.configFile, block);
-  steps.push(`Registered MCP server "${paths.mcpServerName}" → ${paths.mcpCommand}`);
-  return { ok: true, message: 'installed', steps };
+  return out;
 }
 
 // =============================================================================
 // Install Skills
 // =============================================================================
 
-/**
- * Copy src/skills/core/* SKILL.md to Codex skills dir as gollum-*/
 export function installCodexSkills(paths: CodexPaths): InstallResult {
   const steps: string[] = [];
-  const srcDir = resolve(process.cwd(), 'src/skills/core');
-  if (!existsSync(srcDir)) {
-    return { ok: false, message: `source skills dir not found: ${srcDir}`, steps };
+  const src = bundledSkillsDir();
+  if (!existsSync(src)) {
+    return { ok: false, message: `bundled skills not found at ${src}. Run 'npm run build' first.`, steps };
   }
-  if (!existsSync(paths.skillsDir)) {
-    mkdirSync(paths.skillsDir, { recursive: true });
+  if (!existsSync(paths.detectDir)) {
+    return { ok: false, message: `Codex not detected (~/.codex missing)`, steps };
   }
+  mkdirSync(paths.skillsDir, { recursive: true });
 
-  const skillNames = [
-    'task-run',
-    'task-resume',
-    'verify',
-    'recover',
-    'outcome-evaluate',
-    'goal-align',
-  ];
-
-  for (const name of skillNames) {
-    const src = join(srcDir, name, 'SKILL.md');
-    if (!existsSync(src)) {
-      steps.push(`⚠ skill ${name} not found at ${src}`);
+  let linked = 0;
+  for (const skill of findSkills(src)) {
+    const dest = join(paths.skillsDir, skill.name);
+    if (existsSync(dest)) {
+      try {
+        if (lstatSync(dest).isSymbolicLink()) {
+          steps.push(`exists ${dest}`);
+          continue;
+        }
+      } catch { /* fall through */ }
+      steps.push(`skipped ${dest} (exists and is not a symlink)`);
       continue;
     }
-    const dest = join(paths.skillsDir, `gollum-${name}`, 'SKILL.md');
-    if (!existsSync(dirname(dest))) mkdirSync(dirname(dest), { recursive: true });
-    const content = readFileSync(src, 'utf-8');
-    writeFileSync(dest, content);
-    steps.push(`Installed skill gollum-${name} → ${dest}`);
+    try {
+      symlinkSync(skill.dir, dest, 'dir');
+      steps.push(`linked ${dest} → ${skill.dir}`);
+      linked++;
+    } catch (e) {
+      steps.push(`FAILED ${dest}: ${(e as Error).message}`);
+    }
   }
-
-  return { ok: true, message: 'skills installed', steps };
+  return { ok: true, message: `linked ${linked} skill(s)`, steps };
 }
 
 // =============================================================================
@@ -142,14 +109,11 @@ export function installCodexSkills(paths: CodexPaths): InstallResult {
 
 export function verifyCodexInstall(paths: CodexPaths): InstallResult {
   const steps: string[] = [];
-  if (!existsSync(paths.mcpCommand)) {
-    return {
-      ok: false,
-      message: `MCP server binary not built: ${paths.mcpCommand}. Run 'npm run build' first.`,
-      steps,
-    };
+  const src = bundledSkillsDir();
+  if (!existsSync(src)) {
+    return { ok: false, message: `bundled skills not built: ${src}. Run 'npm run build' first.`, steps };
   }
-  steps.push(`✓ MCP binary exists: ${paths.mcpCommand}`);
+  steps.push(`✓ bundled skills present: ${src}`);
   return { ok: true, message: 'verified', steps };
 }
 
@@ -165,17 +129,21 @@ export function installCodex(): InstallResult {
   steps.push(...verify.steps);
   if (!verify.ok) return { ok: false, message: verify.message, steps };
 
-  const mcp = installCodexMcpServer(paths);
-  steps.push(...mcp.steps);
-  if (!mcp.ok) return { ok: false, message: mcp.message, steps };
-
   const skills = installCodexSkills(paths);
   steps.push(...skills.steps);
   if (!skills.ok) return { ok: false, message: skills.message, steps };
 
+  steps.push('');
+  steps.push('No MCP server registered — use the `gollum` CLI from the skills.');
+
   return {
     ok: true,
-    message: `Codex integration installed. Restart Codex to pick up.`,
+    message: 'Codex integration installed (skills only). Restart Codex to pick up.',
     steps,
   };
+}
+
+// Kept for API compatibility; no longer writes a config.toml block.
+export function installCodexMcpServer(paths: CodexPaths): InstallResult {
+  return { ok: true, message: 'MCP registration removed', steps: ['skipped: MCP is not used'] };
 }

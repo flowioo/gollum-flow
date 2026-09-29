@@ -12,22 +12,22 @@ import { Store } from '../src/workflow/store/store.js';
 import {
   projectCreate,
   goalCreate,
-} from '../src/mcp/core/goal.js';
+} from '../src/core/goal.js';
 import {
   outcomeCreate,
   outcomeRemainingGap,
   outcomeMarkVerified,
-} from '../src/mcp/core/outcome.js';
-import { criterionCreate } from '../src/mcp/core/criterion.js';
+} from '../src/core/outcome.js';
+import { criterionCreate } from '../src/core/criterion.js';
 import {
   taskCreate,
   taskClaim,
   taskCheckpoint,
   taskComplete,
-} from '../src/mcp/core/task.js';
-import { verifyByCriterion } from '../src/mcp/core/verify.js';
-import { applyRecovery } from '../src/mcp/core/recover.js';
-import { goalAlign, handleMisaligned } from '../src/mcp/core/goal-align.js';
+} from '../src/core/task.js';
+import { verifyByCriterion } from '../src/core/verify.js';
+import { applyRecovery } from '../src/core/recover.js';
+import { goalAlign, handleMisaligned } from '../src/core/goal-align.js';
 import { schedulerTick } from '../src/workflow/scheduler/scheduler.js';
 
 const REPO = 'tests/fixtures/demo-repo';

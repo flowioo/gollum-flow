@@ -19,15 +19,15 @@
  */
 
 import { getStore } from '../src/workflow/store/store.js';
-import { goalCreate, projectGetOrCreateDefault } from '../src/mcp/core/goal.js';
-import { outcomeCreate } from '../src/mcp/core/outcome.js';
-import { criterionCreate } from '../src/mcp/core/criterion.js';
-import { taskCreate, taskClaim, taskCheckpoint, taskComplete } from '../src/mcp/core/task.js';
-import { evidenceCreate } from '../src/mcp/core/evidence.js';
-import { goalAlign } from '../src/mcp/core/goal-align.js';
+import { goalCreate, projectGetOrCreateDefault } from '../src/core/goal.js';
+import { outcomeCreate } from '../src/core/outcome.js';
+import { criterionCreate } from '../src/core/criterion.js';
+import { taskCreate, taskClaim, taskCheckpoint, taskComplete } from '../src/core/task.js';
+import { evidenceCreate } from '../src/core/evidence.js';
+import { goalAlign } from '../src/core/goal-align.js';
 import {
   githubSearchIssues, githubGetIssue, githubCreatePrCompare, githubGetPr,
-} from '../src/mcp/core/github.js';
+} from '../src/core/github.js';
 
 import { existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';

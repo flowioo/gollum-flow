@@ -10,17 +10,17 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { projectCreate, goalCreate } from '../src/mcp/core/goal.js';
-import { outcomeCreate, outcomeMarkVerified } from '../src/mcp/core/outcome.js';
-import { criterionCreate } from '../src/mcp/core/criterion.js';
-import { evidenceCreate } from '../src/mcp/core/evidence.js';
-import { taskCreate, taskClaim } from '../src/mcp/core/task.js';
+import { projectCreate, goalCreate } from '../src/core/goal.js';
+import { outcomeCreate, outcomeMarkVerified } from '../src/core/outcome.js';
+import { criterionCreate } from '../src/core/criterion.js';
+import { evidenceCreate } from '../src/core/evidence.js';
+import { taskCreate, taskClaim } from '../src/core/task.js';
 import {
   goalAlign,
   handleMisaligned,
   llmSemanticCheck,
   evidenceBasedCheck,
-} from '../src/mcp/core/goal-align.js';
+} from '../src/core/goal-align.js';
 import { makeTestStore } from './helpers.js';
 
 describe('Goal Alignment / llmSemanticCheck', () => {

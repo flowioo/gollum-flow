@@ -17,14 +17,14 @@
  *   - ASSERTION_FAILED   → 提示 Task 重新执行代码修改
  */
 
-import { type Store } from '../../workflow/store/store.js';
+import { type Store } from '../workflow/store/store.js';
 import {
   type Task,
   type ToolResult,
   type VerifyStatus,
   type Criterion,
   type VerifierSpec,
-} from '../../workflow/model/types.js';
+} from '../workflow/model/types.js';
 
 // =============================================================================
 // Types

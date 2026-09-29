@@ -15,12 +15,12 @@
  */
 
 import { ulid } from 'ulid';
-import { NotFoundError, type Store } from '../../workflow/store/store.js';
+import { NotFoundError, type Store } from '../workflow/store/store.js';
 import {
   guardTaskTransition,
   IllegalTransitionError,
-} from '../../workflow/model/state.js';
-import type { Task, CheckpointPayload, WakeCondition } from '../../workflow/model/types.js';
+} from '../workflow/model/state.js';
+import type { Task, CheckpointPayload, WakeCondition } from '../workflow/model/types.js';
 
 // =============================================================================
 // Constants (DESIGN §6.4)

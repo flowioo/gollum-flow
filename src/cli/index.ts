@@ -13,18 +13,18 @@ import {
   goalCreate,
   goalList,
   goalGet,
-} from '../mcp/core/goal.js';
+} from '../core/goal.js';
 import {
   outcomeCreate,
   outcomeListActive,
   outcomeGet,
   outcomeRemainingGap,
   outcomeMarkVerified,
-} from '../mcp/core/outcome.js';
+} from '../core/outcome.js';
 import {
   criterionCreate,
   criterionList,
-} from '../mcp/core/criterion.js';
+} from '../core/criterion.js';
 import {
   taskCreate,
   taskGet,
@@ -34,16 +34,16 @@ import {
   taskFail,
   taskWait,
   taskBlock,
-} from '../mcp/core/task.js';
-import { evidenceCreate, evidenceList } from '../mcp/core/evidence.js';
+} from '../core/task.js';
+import { evidenceCreate, evidenceList } from '../core/evidence.js';
 import { validatePlan, type PlannedGoal } from '../workflow/planner.js';
 import { schedulerCommand } from './commands/scheduler.js';
 import { supervisorCommand } from './commands/supervisor.js';
 import { quotaCommand } from './commands/quota.js';
 import { heartbeatCommand } from './commands/heartbeat.js';
-import { verifyByCriterion, verifyCommand, verifyGit } from '../mcp/core/verify.js';
-import { applyRecovery } from '../mcp/core/recover.js';
-import { goalAlign, handleMisaligned, handleUncertain } from '../mcp/core/goal-align.js';
+import { verifyByCriterion, verifyCommand, verifyGit } from '../core/verify.js';
+import { applyRecovery } from '../core/recover.js';
+import { goalAlign, handleMisaligned, handleUncertain } from '../core/goal-align.js';
 import { installCodex } from '../adapters/codex/installer.js';
 import { installClaude } from '../adapters/claude-code/installer.js';
 import type { Outcome, Task } from '../workflow/model/types.js';
@@ -697,7 +697,7 @@ const install = program.command('install').description('Install Gollum into an A
 
 install
   .command('codex')
-  .description('Install Gollum MCP server + skills into Codex CLI')
+  .description('Install Gollum skills into Codex CLI (no MCP server)')
   .action(() => {
     const result = installCodex();
     console.log(result.message);
@@ -707,7 +707,7 @@ install
 
 install
   .command('claude')
-  .description('Install Gollum MCP server + skills into Claude Code')
+  .description('Install Gollum skills into Claude Code (no MCP server)')
   .action(() => {
     const result = installClaude();
     console.log(result.message);

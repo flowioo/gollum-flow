@@ -32,10 +32,10 @@ import {
   STUCK_RETRY_LIMIT,
   HEARTBEAT_STALE_MS,
 } from '../src/agent/heartbeat.js';
-import { taskCreate, taskClaim } from '../src/mcp/core/task.js';
-import { outcomeCreate } from '../src/mcp/core/outcome.js';
-import { goalCreate } from '../src/mcp/core/goal.js';
-import { projectGetOrCreateDefault } from '../src/mcp/core/goal.js';
+import { taskCreate, taskClaim } from '../src/core/task.js';
+import { outcomeCreate } from '../src/core/outcome.js';
+import { goalCreate } from '../src/core/goal.js';
+import { projectGetOrCreateDefault } from '../src/core/goal.js';
 
 // =============================================================================
 // Quota detection

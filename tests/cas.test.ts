@@ -12,9 +12,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { StateConflictError } from '../src/workflow/store/store.js';
-import { goalCreate, projectCreate } from '../src/mcp/core/goal.js';
-import { outcomeCreate } from '../src/mcp/core/outcome.js';
-import { taskCreate, taskComplete } from '../src/mcp/core/task.js';
+import { goalCreate, projectCreate } from '../src/core/goal.js';
+import { outcomeCreate } from '../src/core/outcome.js';
+import { taskCreate, taskComplete } from '../src/core/task.js';
 import { makeTestStore } from './helpers.js';
 
 describe('CAS / casUpdate', () => {

@@ -21,7 +21,7 @@ function ghHeaders(): Record<string, string> {
   const h: Record<string, string> = {
     'Accept': 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'gollum-mcp/0.5',
+    'User-Agent': 'gollum-cli/0.2',
   };
   if (GH_TOKEN) h['Authorization'] = `Bearer ${GH_TOKEN}`;
   return h;

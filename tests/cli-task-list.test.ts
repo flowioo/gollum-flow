@@ -28,9 +28,9 @@ async function freshDb(): Promise<FreshHandles & { cleanup: () => void }> {
   process.env.GOLLUM_DB_PATH = dbPath;
   const storeMod = await import('../src/workflow/store/store.js');
   storeMod.resetStore();
-  const goalMod = await import('../src/mcp/core/goal.js');
-  const outcomeMod = await import('../src/mcp/core/outcome.js');
-  const taskMod = await import('../src/mcp/core/task.js');
+  const goalMod = await import('../src/core/goal.js');
+  const outcomeMod = await import('../src/core/outcome.js');
+  const taskMod = await import('../src/core/task.js');
   return {
     resetStore: () => storeMod.resetStore(),
     getStore: () => storeMod.getStore(),

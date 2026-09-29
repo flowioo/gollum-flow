@@ -8,9 +8,9 @@
  */
 
 import { ulid } from 'ulid';
-import { type Store } from '../../workflow/store/store.js';
+import { type Store } from '../workflow/store/store.js';
 import { criterionAttachEvidence } from './criterion.js';
-import type { Evidence, EvidenceStatus } from '../../workflow/model/types.js';
+import type { Evidence, EvidenceStatus } from '../workflow/model/types.js';
 
 // =============================================================================
 // 1. evidence.create (delegates to criterion.attach_evidence)

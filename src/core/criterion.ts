@@ -10,8 +10,8 @@
  */
 
 import { ulid } from 'ulid';
-import { NotFoundError, type Store } from '../../workflow/store/store.js';
-import type { Criterion, VerifierSpec } from '../../workflow/model/types.js';
+import { NotFoundError, type Store } from '../workflow/store/store.js';
+import type { Criterion, VerifierSpec } from '../workflow/model/types.js';
 
 // =============================================================================
 // 1. criterion.create
@@ -93,12 +93,12 @@ export function criterionCreate(store: Store, input: CriterionCreateInput): Crit
 
 export interface CriterionGetResult {
   criterion: Criterion;
-  latest_evidence: import('../../workflow/model/types.js').Evidence | null;
+  latest_evidence: import('../workflow/model/types.js').Evidence | null;
 }
 
 export function criterionGet(store: Store, criterion_id: string): CriterionGetResult {
   const criterion = parseCriterion(store.get<Criterion>('criteria', criterion_id));
-  let latest_evidence: import('../../workflow/model/types.js').Evidence | null = null;
+  let latest_evidence: import('../workflow/model/types.js').Evidence | null = null;
   if (criterion.latest_evidence_id) {
     latest_evidence = store.tryGet('evidences', criterion.latest_evidence_id);
   }
@@ -121,7 +121,7 @@ export function criterionList(store: Store, outcome_id: string): Criterion[] {
 
 export interface AttachEvidenceInput {
   criterion_id: string;
-  evidence: import('../../workflow/model/types.js').Evidence;
+  evidence: import('../workflow/model/types.js').Evidence;
 }
 
 /**

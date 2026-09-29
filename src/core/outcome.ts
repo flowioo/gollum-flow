@@ -9,9 +9,9 @@
  */
 
 import { ulid } from 'ulid';
-import { NotFoundError, type Store } from '../../workflow/store/store.js';
-import { guardOutcomeTransition } from '../../workflow/model/state.js';
-import type { Outcome, OutcomeStatus, RemainingGap } from '../../workflow/model/types.js';
+import { NotFoundError, type Store } from '../workflow/store/store.js';
+import { guardOutcomeTransition } from '../workflow/model/state.js';
+import type { Outcome, OutcomeStatus, RemainingGap } from '../workflow/model/types.js';
 
 // =============================================================================
 // 1. outcome.list_active
@@ -39,13 +39,13 @@ export function outcomeListActive(
 
 export interface OutcomeGetResult {
   outcome: Outcome;
-  criteria: import('../../workflow/model/types.js').Criterion[];
+  criteria: import('../workflow/model/types.js').Criterion[];
 }
 
 export function outcomeGet(store: Store, outcome_id: string): OutcomeGetResult {
   const outcome = parseOutcome(store.get<Outcome>('outcomes', outcome_id));
   const criteria = store
-    .list<import('../../workflow/model/types.js').Criterion>(
+    .list<import('../workflow/model/types.js').Criterion>(
       'criteria',
       'outcome_id = ?',
       [outcome_id],
@@ -59,7 +59,7 @@ export function outcomeGet(store: Store, outcome_id: string): OutcomeGetResult {
 // =============================================================================
 
 export function outcomeRemainingGap(store: Store, outcome_id: string): RemainingGap {
-  const criteria = store.list<import('../../workflow/model/types.js').Criterion>(
+  const criteria = store.list<import('../workflow/model/types.js').Criterion>(
     'criteria',
     'outcome_id = ?',
     [outcome_id],

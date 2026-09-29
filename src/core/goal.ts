@@ -9,8 +9,8 @@
  */
 
 import { ulid } from 'ulid';
-import { NotFoundError, type Store } from '../../workflow/store/store.js';
-import type { Goal } from '../../workflow/model/types.js';
+import { NotFoundError, type Store } from '../workflow/store/store.js';
+import type { Goal } from '../workflow/model/types.js';
 
 // =============================================================================
 // 1. goal.list
@@ -42,12 +42,12 @@ export function goalList(store: Store, input: GoalListInput = {}): Goal[] {
 
 export interface GoalGetResult {
   goal: Goal;
-  outcomes: import('../../workflow/model/types.js').Outcome[];
+  outcomes: import('../workflow/model/types.js').Outcome[];
 }
 
 export function goalGet(store: Store, goal_id: string): GoalGetResult {
   const goal = store.get<Goal>('goals', goal_id);
-  const outcomes = store.list<import('../../workflow/model/types.js').Outcome>(
+  const outcomes = store.list<import('../workflow/model/types.js').Outcome>(
     'outcomes',
     'goal_id = ?',
     [goal_id],
@@ -131,7 +131,7 @@ export function goalUpdate(
 
 export function goalAchieve(store: Store, goal_id: string): Goal {
   const goal = store.get<Goal>('goals', goal_id);
-  const outcomes = store.list<import('../../workflow/model/types.js').Outcome>(
+  const outcomes = store.list<import('../workflow/model/types.js').Outcome>(
     'outcomes',
     'goal_id = ?',
     [goal_id],
@@ -170,9 +170,9 @@ export interface ProjectCreateInput {
   description?: string;
 }
 
-export function projectCreate(store: Store, input: ProjectCreateInput): import('../../workflow/model/types.js').Project {
+export function projectCreate(store: Store, input: ProjectCreateInput): import('../workflow/model/types.js').Project {
   const now = new Date().toISOString();
-  const project: import('../../workflow/model/types.js').Project = {
+  const project: import('../workflow/model/types.js').Project = {
     id: ulid(),
     name: input.name,
     description: input.description ?? null,
@@ -199,15 +199,15 @@ export function projectCreate(store: Store, input: ProjectCreateInput): import('
   return project;
 }
 
-export function projectGet(store: Store, id: string): import('../../workflow/model/types.js').Project {
+export function projectGet(store: Store, id: string): import('../workflow/model/types.js').Project {
   return store.get('projects', id);
 }
 
-export function projectList(store: Store): import('../../workflow/model/types.js').Project[] {
+export function projectList(store: Store): import('../workflow/model/types.js').Project[] {
   return store.list('projects');
 }
 
-export function projectGetOrCreateDefault(store: Store): import('../../workflow/model/types.js').Project {
+export function projectGetOrCreateDefault(store: Store): import('../workflow/model/types.js').Project {
   // V0.1: singleton project (DESIGN §13 + PRD §6.4 Decision 13)
   const existing = projectList(store);
   if (existing.length > 0) return existing[0]!;

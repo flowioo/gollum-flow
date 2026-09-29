@@ -4,21 +4,21 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { projectCreate, goalCreate } from '../src/mcp/core/goal.js';
-import { outcomeCreate } from '../src/mcp/core/outcome.js';
-import { criterionCreate, criterionList } from '../src/mcp/core/criterion.js';
-import { taskCreate, taskClaim } from '../src/mcp/core/task.js';
+import { projectCreate, goalCreate } from '../src/core/goal.js';
+import { outcomeCreate } from '../src/core/outcome.js';
+import { criterionCreate, criterionList } from '../src/core/criterion.js';
+import { taskCreate, taskClaim } from '../src/core/task.js';
 import {
   verifyCommand,
   verifyGit,
   verifyByCriterion,
   type ToolResult,
-} from '../src/mcp/core/verify.js';
+} from '../src/core/verify.js';
 import {
   classifyFailure,
   decideRecovery,
   applyRecovery,
-} from '../src/mcp/core/recover.js';
+} from '../src/core/recover.js';
 import { makeTestStore } from './helpers.js';
 
 describe('verify.command', () => {
