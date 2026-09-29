@@ -24,20 +24,27 @@
                            ▼
                   ┌────────────────────┐
                   │  Gollum Distro     │
-                  │  AGENTS.md         │
+                  │  AGENTS.md (未实现) │
                   │  Skills / Tools    │
                   └─────────┬──────────┘
                             │
                   ┌─────────┴──────────┐
                   ▼                    ▼
-   ~/.gollum/registry.yaml    ~/.gollum/proj_<id>/
-   (全局索引)                  (每项目状态)
+   ~/.gollum/registry.yaml    SQLite store (V0.1)
+   (全局索引，YAML)            ~/.local/share/gollum/gollum.db
+                               (状态真相源)
 ```
+
+> ⚠️ **与 §2.2 的差异**：§2.2 描述的「`~/.gollum/proj_<id>/` 每项目一个 YAML 目录」
+> 是原始设计，**未实现**。实际实现沿用 V0.1 的 SQLite store
+> （`~/.local/share/gollum/gollum.db`，WAL + CAS）。
+> `~/.gollum/` 当前只存放非状态文件：skills / tools / runtime / registry.yaml。
 
 ### 三条核心不变量
 
-1. **Project Identity 在 Repo 里**（`.steward/project.yaml`，跟着代码走）
-2. **Project State 在 `~/.gollum/`**（按项目分目录，不污染 Repo）
+1. **Project Identity 可在 Repo 里声明**（`.gollum/project.yaml` 或 `.steward/project.yaml`，
+   跟着代码走）—— resolver 支持两者，也支持仅靠 SQLite 兜底
+2. **Project State 在 SQLite store**（`~/.local/share/gollum/gollum.db`），不污染 Repo
 3. **Registry 全局唯一**（跨项目索引，但不 JOIN State）
 
 ---
@@ -496,7 +503,10 @@ gollum install-skills --agent codex --global
 
 ### 5.2 分发方式：npm 包
 
-Gollum Runtime 通过 npm 分发，**包名 `gollum`**，源码在 `github.com/kunchenguid/gollum`。
+Gollum Runtime 通过 npm 分发，**包名 `gollum-flow`**（`gollum` 在 registry 上已被他人占用，v1.0.2）。
+
+> ⚠️ **发布状态**：`gollum-flow@0.2.0` **尚未 `npm publish`**。已验证的安装路径是
+> `npm install -g <本地 tarball>`，见 `tests/_v02_install_e2e.sh`。
 
 ```text
 gollum/
@@ -579,73 +589,68 @@ Skills（GitHub repo）提供：
 
 ## 6. Skills（Agent 加载）
 
-### 6.1 Skill 分发：通过 `npx skills add`
+### 6.1 Skill 分发：随 npm tarball 分发 + postinstall 软链
 
-Skills **不打包在 npm 里**，而是放在 GitHub 仓库 `github.com/kunchenguid/gollum/skills/` 下，通过 `npx skills add` 安装到目标 Agent 的 skills 目录。
+> ⚠️ **设计修订（2026-09-29）**：本节原设计为「Skills 独立于 npm，放在 GitHub 仓库，
+> 通过 `npx skills add` 分发」。该方案 **未实现**，因为 `npx skills add` 需要一个
+> GitHub 仓库作为 skill 源，而 Gollum 的实现选择了「Skills 随 npm tarball 一起分发」。
+> 下文保留原设计作为 V0.3 备选。
 
-**为什么分开**：
-
-- Skills 需要被 Agent 加载到上下文（SKILL.md 被 Agent 读）
-- Runtime 是 CLI 工具，需要被 shell 调用
-- 两者的更新节奏不同：Skills 可以频繁迭代，Runtime 相对稳定
-- 解耦后可以独立发版
+**实际实现**：Skills 打包在 npm 包的 `dist/skills/core/` 下，由 `postinstall` 或
+`gollum install-skills` 软链到各宿主。
 
 **安装命令**：
 
 ```bash
-# 全局安装到 Claude Code（默认 agent）
-npx skills add kunchenguid/gollum -g
+# 装 runtime（postinstall 会自动软链 skills）
+npm install -g gollum-flow        # 从 registry（发布后）
+npm install -g /tmp/gollum-flow-0.2.0.tgz   # 从本地 tarball（已验证）
 
-# 安装到指定 agent
-npx skills add kunchenguid/gollum -g --agent claude-code
-npx skills add kunchenguid/gollum -g --agent codex
-npx skills add kunchenguid/gollum -g --agent cursor
-npx skills add kunchenguid/gollum -g --agent mavis
-
-# 同时安装到多个 agent
-npx skills add kunchenguid/gollum \
-    --agent claude-code \
-    --agent codex \
-    --global
-
-# 只装某个 skill（不全装）
-npx skills add kunchenguid/gollum --skill gollum-bootstrap -g
-npx skills add kunchenguid/gollum --skill gollum-verify -g
+# 手动重链（幂等）
+gollum install-skills
+gollum install-skills --agent claude-code
+gollum install-skills --agent codex
+gollum install-skills --agent cursor
+gollum install-skills --agent mavis
 
 # 升级
-npx skills update
+npm update -g gollum-flow
 ```
 
-### 6.2 Skills 仓库结构
+> ❌ `npx skills add kunchenguid/gollum` **不可用**（未实现，见上）。
+> ❌ `npx skills update` 也不适用于本项目。
+
+### 6.2 Skills 包内结构
 
 ```text
-github.com/kunchenguid/gollum/
-└── skills/
-    ├── gollum-bootstrap/
-    │   └── SKILL.md
-    ├── gollum-goal-align/
-    │   └── SKILL.md
-    ├── gollum-task-run/
-    │   └── SKILL.md
-    ├── gollum-verify/
-    │   └── SKILL.md
-    ├── gollum-recover/
-    │   └── SKILL.md
-    └── gollum-ship-scout/
-        └── SKILL.md
+gollum-flow/
+└── dist/skills/core/                # build 时从 src/skills/ 复制
+    ├── bootstrap/SKILL.md           # name: gollum-bootstrap
+    ├── goal-align/SKILL.md          # name: gollum-goal-align
+    ├── outcome-evaluate/SKILL.md    # name: gollum-outcome-evaluate
+    ├── recover/SKILL.md             # name: gollum-recover
+    ├── task-resume/SKILL.md         # name: gollum-task-run-resume
+    ├── task-run/SKILL.md            # name: gollum-task-run
+    └── verify/SKILL.md              # name: gollum-verify
 ```
+
+> 目录名与 frontmatter `name:` 不一致是有意的：目录名短（避免路径过长），
+> `name:` 字段带 `gollum-` 前缀以避免与其他 skill 撞名。
+> `gollum install-skills` 按**目录名**链接，`doctor` 按**目录名**校验。
 
 ### 6.3 安装位置
 
-`npx skills add` 会把 SKILL.md 软链到目标 Agent 的 skills 目录：
+`gollum install-skills` 把 skill 目录软链到目标宿主的 skills 目录：
 
 ```text
-Claude Code:   ~/.claude/skills/gollum-{name}/SKILL.md
-              或 ./.claude/skills/gollum-{name}/SKILL.md (项目级)
-Codex:         .agents/skills/gollum-{name}/SKILL.md
-Cursor:        ~/.cursor/skills/gollum-{name}/SKILL.md
-Mavis:         ~/.mavis/skills/gollum-{name}/SKILL.md
+Claude Code:   ~/.claude/skills/{name}  ->  <pkg>/dist/skills/core/{name}
+Codex:         ~/.codex/skills/{name}  ->  <pkg>/dist/skills/core/{name}
+Cursor:        ~/.cursor/skills/{name}  ->  <pkg>/dist/skills/core/{name}
+Mavis:         ~/.mavis/skills/{name}  ->  <pkg>/dist/skills/core/{name}
 ```
+
+**只链接已检测到的宿主**（`~/.claude` 等目录存在才链接），避免在没装该宿主的机器上
+创建无用目录。可用 `--agent <name>` 强制指定单个宿主。
 
 ### 6.4 Skill 文件格式
 
@@ -715,7 +720,7 @@ description: |
 
 | 模式 | 实现位置 | 优先级 |
 |---|---|---|
-| **Agent Distro**（npm + skills 分发） | `npm install -g gollum` + `npx skills add kunchenguid/gollum` | P0 |
+| **Agent Distro**（npm tarball + postinstall 软链） | `npm install -g gollum-flow` + `gollum install-skills` | P0（已实现，registry 发布待做） |
 | **AGENTS.md 入口** | `templates/AGENTS.md` + skill 注入 | P1 |
 | **ship / scout 任务分类** | Task 模型 `shape` 字段 + `gollum-ship-scout` skill | P1 |
 | **bash watcher 零 token** | `runtime/watcher.sh` | P2 |
@@ -830,77 +835,86 @@ MISALIGNED   → pause current task → backlog → replan → ask user
 
 ## 10. 实施步骤
 
-### W1 — npm 包骨架
+### W1 — npm 包骨架  ✅ 已完成
 
-```bash
-mkdir -p gollum/{bin,lib,skills,templates,hooks}
-# package.json（见第 5.2 节）
-# bin/gollum.js（CLI 入口，Node.js）
-# hooks/postinstall.js（创建 ~/.gollum/ 目录结构）
-```
+- `package.json`：`gollum-flow@0.2.0`，publishable（非 private），3 个 bin
+  （`gollum` / `gollum-resolver` / `gollum-store`），`files` 白名单，`postinstall`
+- `src/hooks/postinstall.ts`：创建 `~/.gollum/{skills,tools,runtime/{leases,events,scheduler}}`
+  + `registry.yaml`，检测 4 个宿主，软链 skills
+- **ESM bug 已修**：原实现用了 `require()`，在 `"type": "module"` 下崩溃，
+  且被 `|| node -e "echo"` fallback 掩盖。已改为纯 `import`，fallback 已删除，
+  E2E 加了显式断言（step 3a）
 
-发布到 npm：
+### W1b — npm publish  ❌ 未完成
 
 ```bash
 npm login
 npm publish --access public
-# → gollum@0.2.0 可被 npm install -g gollum
+# → gollum-flow@0.2.0
 ```
 
-### W2 — Skills 仓库
+包名 `gollum` 已被占用（registry 上是他人包 v1.0.2），因此改名 `gollum-flow`。
+**发布是人工动作，尚未执行**；当前只验证了本地 tarball 安装路径。
 
-```bash
-mkdir -p gollum/skills/{gollum-bootstrap,gollum-goal-align,gollum-task-run,gollum-verify,gollum-recover,gollum-ship-scout}
-# 每个 skill 写 SKILL.md（参考第 6.4 节模板）
-```
+### W2 — Skills 打包  ✅ 已完成
 
-发布到 GitHub：`github.com/kunchenguid/gollum` 的 `skills/` 目录。
+- `src/skills/core/{bootstrap,goal-align,outcome-evaluate,recover,task-resume,task-run}/SKILL.md`
+  全部带 YAML frontmatter（`name` + `description`）
+- `build` 脚本把它们复制到 `dist/skills/core/`（先 `rm -rf` 旧的，避免嵌套累积）
+- 目录名短、`name:` 带 `gollum-` 前缀
 
-### W3 — Init + Bootstrap
+### W3–W5 — Init / State / CLI  ✅ 由 V0.1 提供
 
-```bash
-gollum init
-  # 创建 .steward/project.yaml
-  # 创建 ~/.gollum/proj_<id>/
-  # 注册到 registry.yaml
-  # 提示输入 Goal
-```
+- `gollum init`、`goal/outcome/criterion/task/evidence` 全套命令：V0.1 已实现
+- State 层：SQLite（`node:sqlite` + WAL）+ CAS，**不是**本文档 §2 描述的
+  `~/.gollum/proj_<id>/` YAML 分目录结构
+- `checkpoint` 是 task 的字段，不是独立命令
 
-### W4 — State + CAS
+> ⚠️ 本文档 §2 的「`~/.gollum/proj_<id>/` 集中式 YAML 目录」是**原始设计**，
+> 实际实现选择了 V0.1 的 SQLite store。`~/.gollum/` 目前只放
+> skills / tools / runtime / registry.yaml 等非状态文件。
 
-实现 `lib/store.js` 的 `updateYaml` 和 `flock`。
+### W6 — Resolver + Bootstrap  ⚠️ 部分完成
 
-### W5 — CLI 工具
+- `src/workflow/resolver.ts`：向上递归找 `.gollum/project.yaml`（兼容 `.steward/`），回退 SQLite
+- `src/cli/gollum-resolver.ts`：`notify-cwd` / `current` / `list`
+- ❌ shell hook（zsh precmd / bash PROMPT_COMMAND）**未实现**，需用户自行配置
+- ❌ Project Switch Protocol（切目录时 checkpoint + 释放 lease）**未实现**
 
-实现 `gollum goal/outcome/task/evidence/checkpoint` 全套。
+### W7 — 安装流程 E2E  ✅ 已完成
 
-### W6 — Resolver + Bootstrap
+`tests/_v02_install_e2e.sh`，隔离 HOME（`$FAKE_HOME`），6 步：
 
-实现 `lib/resolver.js`，写 shell hook 集成。
+1. build
+2. `npm pack` + 断言 tarball 内含 7 个 `SKILL.md`
+3. 从 tarball `npm install --ignore-scripts` 到隔离 prefix
+3a. 手动跑 postinstall，断言 exit 0 且无 ESM require 错误
+3b. 断言 `~/.gollum/` 结构在**隔离 HOME** 下被创建
+4. `gollum install-skills`（先 seed `$FAKE_HOME/.claude`）
+4a. **软链审计**：7 个 link 的 realpath 必须在 tarball install 前缀下，不得指向开发树
+5. `gollum doctor`（隔离 HOME）全绿
+6. Claude Code 读 tarball 安装的 SKILL.md，返回 `gollum-bootstrap` +
+   `gollum-resolver notify-cwd "$PWD"`
 
-### W7 — 安装流程 E2E
+> 原版本的 Claude 断言只查目录存在，且被开发树遗留软链满足 —— 假阳性。
+> 现版本用隔离 HOME + realpath 审计排除该问题。
+> Claude 需要真实 HOME 做 auth，故 step 6 把隔离 skills 拷到
+> `$REAL_HOME/.claude/gollum-v02-e2e`（保留 symlink），跑完 `trap` 清理。
 
-```bash
-# 全新环境
-npm install -g gollum
-npx skills add kunchenguid/gollum -g
-cd ~/code/new-project
-gollum init
-codex
-# 验证 [Gollum] Context Injection 出现
-```
+### W8 — 全场景 E2E  ⚠️ 部分
 
-### W8 — 全场景 E2E 测试
-
-测试场景：
-1. npm 全局安装 + skills add 全局安装
-2. 单项目完整生命周期
-3. 跨项目切换
-4. 跨 Session 恢复
-5. CAS 冲突
-6. Lease 过期
-7. npx skills update 升级
-8. gollum doctor 自检
+| 场景 | 状态 | 证据 |
+|---|---|---|
+| npm 安装 + skills 软链 | ✅ | `tests/_v02_install_e2e.sh` |
+| gollum doctor 自检 | ✅ | 同上 step 5 |
+| 单项目完整生命周期 | ✅ | `tests/_v01_demo.mts`（V0.1） |
+| 跨 Session 恢复 | ✅ | `tests/_process_a.ts` + `_process_b.ts`（V0.1） |
+| CAS 冲突 | ✅ | `tests/cas.test.ts`（V0.1） |
+| Lease 过期 | ✅ | `tests/scheduler.test.ts`（V0.1） |
+| 单测全量 | ✅ | `npm test` → 77/77 pass |
+| 跨项目切换 | ❌ | resolver 只做解析，切换协议未实现 |
+| npm registry 安装 | ❌ | 未 publish |
+| `npx skills update` 升级 | ❌ | 该机制不适用 |
 
 ---
 
@@ -943,4 +957,8 @@ tail -f ~/.gollum/runtime/events/2026-09-28.yaml
 
 ## 13. 一句话总结
 
-> **Gollum V0.2 是 `~/.gollum/proj_<id>/` 集中式状态层 + Goal/Outcome/Task/Evidence/Checkpoint 五层模型 + YAML + CAS，Runtime 通过 npm 分发、Skills 通过 `npx skills add` 安装到任意 Coding Agent，让多项目间切换不丢上下文。**
+> **Gollum V0.2 = V0.1 的状态层（Goal/Outcome/Task/Evidence/Checkpoint + SQLite + CAS） + npm 分发层（gollum-flow tarball + postinstall + doctor + install-skills + 7 个带 frontmatter 的 Skills）。**
+>
+> 未完成：`npm publish`、PR F15–F18（AGENTS.md 模板 / ship-scout / watcher / memory）、`npx skills add` 集成。
+>
+> 已验证：`tests/_v02_install_e2e.sh` 在隔离 HOME 下从 tarball 安装 → 软链审计通过 → doctor 全绿 → Claude Code 读到 tarball 安装的 SKILL.md。

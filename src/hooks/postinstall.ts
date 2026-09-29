@@ -5,14 +5,14 @@
  * and detect available coding agents.
  */
 
-import { existsSync, mkdirSync, symlinkSync, readlinkSync, statSync } from 'node:fs';
-import { join } from 'node:path';
-import { homedir, platform } from 'node:os';
+import { existsSync, mkdirSync, symlinkSync, readdirSync, writeFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 const GOLLUM_HOME = join(homedir(), '.gollum');
-const PKG_ROOT = process.env.GOLLUM_PKG_ROOT || new URL('..', import.meta.url).pathname;
-// PKG_ROOT points at dist/hooks/.. = dist/. We want the install root which is one level up from dist.
-const INSTALL_ROOT = process.env.GOLLUM_PKG_ROOT || join(new URL('..', import.meta.url).pathname, '..');
+// dist/hooks/postinstall.js → dist/skills is one level up
+const INSTALL_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const colors = {
   reset: '\x1b[0m',
@@ -38,7 +38,7 @@ function ensureDir(p: string, label: string) {
 
 function writeIfMissing(p: string, content: string, label: string) {
   if (!existsSync(p)) {
-    require('node:fs').writeFileSync(p, content, 'utf-8');
+    writeFileSync(p, content, 'utf-8');
     ok(`wrote   ${label} ${colors.dim}${p}${colors.reset}`);
   } else {
     info(`exists  ${label} ${colors.dim}${p}${colors.reset}`);
@@ -85,7 +85,7 @@ const BUNDLED_SKILLS_SRC = join(INSTALL_ROOT, 'skills');
 if (existsSync(BUNDLED_SKILLS_SRC)) {
   for (const agent of detected) {
     ensureDir(agent.skillsDir, `~/.${agent.name}/skills`);
-    const entries = require('node:fs').readdirSync(BUNDLED_SKILLS_SRC, { withFileTypes: true });
+    const entries = readdirSync(BUNDLED_SKILLS_SRC, { withFileTypes: true });
     for (const ent of entries) {
       if (!ent.isDirectory()) continue;
       const src = join(BUNDLED_SKILLS_SRC, ent.name);

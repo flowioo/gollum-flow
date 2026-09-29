@@ -152,27 +152,45 @@ $ cd ~/code/project-c && hermes    # Project C
 | F9. Checkpoint 工具 | `gollum checkpoint.save` / `checkpoint.load` | 切换目录后老 Project 有新 checkpoint |
 | F10. Registry | `~/.gollum/registry.yaml` 维护所有 Project | vim 可读，新增 init 自动注册 |
 
-### 5.2 P1 — V0.2
+### 5.2 P1 — 已交付
+
+| 功能 | 状态 | 证据 |
+|---|---|---|
+| F11. Skills 可被宿主加载 | ✅ 已实现 | 7 个 SKILL.md 带 frontmatter；E2E 证明 Claude 读到 tarball 安装的 skill |
+| F12. `gollum doctor` 自检 | ✅ 已实现 | `src/cli/commands/doctor.ts`（Node/目录/store/宿主/skills/项目 六项） |
+| F13. `gollum install-skills` | ✅ 已实现 | `src/cli/commands/install-skills.ts`（幂等，`lstat` 区分 symlink） |
+| F14. `gollum-resolver` shell hook 入口 | ✅ 已实现 | `src/workflow/resolver.ts` + `src/cli/gollum-resolver.ts` |
+
+### 5.3 P1 — 未实现（文档先行，代码待补）
+
+> 以下功能在本文档中已定义，但 **V0.2 代码中尚不存在**。不要按它们编写集成。
+
+| 功能 | 描述 | 状态 |
+|---|---|---|
+| F15. AGENTS.md 入口模板 | `templates/AGENTS.md` | ❌ `src/templates/` 不存在 |
+| F16. ship/scout 任务分类 | Task 模型加 `shape` 字段 | ❌ `types.ts` 无该字段 |
+| F17. bash watcher | 状态文件变化触发唤醒 | ❌ 无实现 |
+| F18. Memory 基础读写 | `gollum memory.read/write` | ❌ CLI 无此命令 |
+
+> F15–F18 原编号为 F11–F14，与 §5.2 已交付项重新编号后不冲突。
+
+### 5.4 已由 V0.1 提供（V0.2 未改动）
+
+| 功能 | 位置 |
+|---|---|
+| Goal Alignment 三态 | `src/mcp/core/goal-align.ts` |
+| Scope Creep 关键词检测 | `goal-align.ts:81` |
+
+### 5.5 P2 — V0.3+
 
 | 功能 | 描述 |
 |---|---|
-| F11. AGENTS.md 入口 | 在 `.gollum/AGENTS.md` 写明 Bootstrap 协议，让 Host 自动接管 |
-| F12. ship/scout 任务分类 | Task 模型加 `shape` 字段 |
-| F13. bash watcher | 状态文件变化触发唤醒（可作可选 scheduler） |
-| F14. Memory 基础读写 | `gollum memory.read/write`，限制项目级 |
-| F15. Goal Alignment | 每次 Task 完成检查是否服务 Outcome，三态（ALIGNED/UNCERTAIN/MISALIGNED） |
-| F16. Scope Creep 防护 | 拒绝"cleaner / more elegant / might be useful" 类动机 |
+| F19. firstmate 集成 | 把 firstmate 作为 Gollum 的"并行执行后端" |
+| F20. secondmates | 远程 SSH 副手 |
+| F21. Goal 自动提炼 | 长期 Memory 沉淀到 Goal |
+| F22. 跨项目查询 | 管理员视角的全局 Project 状态 |
 
-### 5.3 P2 — V0.3+
-
-| 功能 | 描述 |
-|---|---|
-| F17. firstmate 集成 | 把 firstmate 作为 Gollum 的"并行执行后端" |
-| F18. secondmates | 远程 SSH 副手 |
-| F19. Goal 自动提炼 | 长期 Memory 沉淀到 Goal |
-| F20. 跨项目查询 | 管理员视角的全局 Project 状态 |
-
-### 5.4 明确不做
+### 5.6 明确不做
 
 - ❌ 完整 Agent 调度系统（firstmate 已经做）
 - ❌ 自动修改 Goal（必须人工 ack）
@@ -187,45 +205,50 @@ $ cd ~/code/project-c && hermes    # Project C
 
 ### 6.1 首次使用
 
-Gollum 分两层发布：**Runtime（CLI + 库）通过 npm 分发**，**Skills（SKILL.md）通过 `npx skills add` 分发到目标 Agent**。
+> ⚠️ **发布状态（2026-09-29）**：`gollum-flow@0.2.0` **尚未发布到 npm registry**。
+> 下方 `npm install -g gollum-flow` 需要先执行 `npm publish` 才可用。
+> 当前已验证的路径是**从本地 tarball 安装**（见 `tests/_v02_install_e2e.sh`）。
+> 包名选 `gollum-flow` 而非 `gollum`，因为后者在 npm 上已被他人占用（v1.0.2）。
 
 ```bash
-# Step 1：安装 Runtime（CLI + 库）
-$ npm install -g gollum
-# 或用 npx 一次性运行（不污染全局）
-$ npx gollum --version
+# ===== 路径 A：本地 tarball（已验证可用）=====
+# 从仓库构建并安装
+$ cd ~/code/gollum && npm run build
+$ npm pack --pack-destination /tmp
+$ npm install -g /tmp/gollum-flow-0.2.0.tgz
 
 # postinstall hook 自动：
-#   - mkdir ~/.gollum/{skills,tools,runtime,registry}
+#   - mkdir ~/.gollum/{skills,tools,runtime/{leases,events,scheduler}}
 #   - 创建 ~/.gollum/registry.yaml
-#   - 把 gollum 自带 Skills 软链到 ~/.gollum/skills/gollum-*/
 #   - 检测可用 Agent（Claude Code / Codex / Cursor / Mavis）
+#   - 软链 skills 到每个已检测 Agent 的 skills 目录
 
-# Step 2：安装 Skills 到目标 Agent
-$ npx skills add kunchenguid/gollum -g
-# 或指定 agent：
-$ npx skills add kunchenguid/gollum -g --agent claude-code
-$ npx skills add kunchenguid/gollum -g --agent codex
-$ npx skills add kunchenguid/gollum -g --agent cursor
+# ===== 路径 B：npm registry（发布后可用）=====
+$ npm install -g gollum-flow
+$ npx gollum-flow doctor
 
-# 同时装到多个 agent：
-$ npx skills add kunchenguid/gollum \
-    --agent claude-code \
-    --agent codex \
-    --global
+# ===== 手动重装 skills（覆盖 postinstall 未覆盖的情况）=====
+$ gollum doctor              # 自检，看 skills 是否已链接
+$ gollum install-skills      # 幂等重链
+$ gollum install-skills --agent claude-code   # 只装到一个 agent
+```
 
-# Step 3：在新项目初始化
+**skills 的分发路径**：Skills 随 npm 包一起分发（`dist/skills/core/*/SKILL.md`），
+由 `postinstall` / `gollum install-skills` 软链到宿主的 skills 目录。
+
+> ❌ **`npx skills add <repo>` 未实现**。该 CLI 需要一个 GitHub 仓库作为
+> skill 源，而 Gollum 的 skills 随 npm tarball 分发，两者机制不同。
+> V0.3 之前请使用上面的 `gollum install-skills`。
+
+**初始化项目**：
+
+```bash
 $ cd ~/code/my-new-project
-$ gollum init
-# 提示输入：Project name / Goal
-# 创建 .steward/project.yaml
-# 创建 ~/.gollum/proj_my_new_project/
-# 注册到 ~/.gollum/registry.yaml
+$ gollum init               # 提示输入 Project name / Goal
 
-# Step 4：启动任意 Host
+# 启动任意 Host
 $ codex   # 或 claude / hermes / mavis
-# Host 启动后检测到已装 gollum-bootstrap skill → 自动 Bootstrap
-# 看到 [Gollum] Context Injection 输出
+# Host 通过已安装的 gollum-bootstrap skill 获得 Bootstrap 协议
 ```
 
 **升级路径**：
