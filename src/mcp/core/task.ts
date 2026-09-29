@@ -67,6 +67,9 @@ export function taskCreate(store: Store, input: TaskCreateInput): Task {
     summary: null,
     last_observation: null,
     estimated_minutes: input.estimated_minutes ?? null,
+    heartbeat_at: null,
+    worker_pid: null,
+    worker_host: null,
     version: 1,
     created_at: now,
     updated_at: now,
@@ -78,8 +81,9 @@ export function taskCreate(store: Store, input: TaskCreateInput): Task {
         id, outcome_id, title, status, phase, priority, acceptance_criteria,
         alignment_verdict, alignment_reason, owner, lease_until, wake_at,
         retry_count, next_action, summary, last_observation, estimated_minutes,
+        heartbeat_at, worker_pid, worker_host,
         version, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       task.id,
@@ -99,6 +103,9 @@ export function taskCreate(store: Store, input: TaskCreateInput): Task {
       task.summary,
       task.last_observation,
       task.estimated_minutes,
+      task.heartbeat_at,
+      task.worker_pid,
+      task.worker_host,
       task.version,
       task.created_at,
       task.updated_at,

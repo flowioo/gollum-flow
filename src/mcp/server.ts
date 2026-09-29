@@ -37,6 +37,15 @@ import {
   githubSearchIssues, githubGetIssue, githubCreatePrCompare, githubGetPr,
   githubForkRepo, githubDetectLocalRepo,
 } from './core/github.js';
+import {
+  recordExhaustion,
+  tickQuotaRecovery,
+  getQuotaState,
+  detectQuotaError,
+  canDispatch,
+  DEFAULT_QUOTA_RECOVERY_MS,
+} from '../agent/quota.js';
+import { taskHeartbeat } from '../agent/heartbeat.js';
 
 // =============================================================================
 // Tool definitions (MCP format)
@@ -325,6 +334,66 @@ const TOOLS = [
       },
     },
   },
+  // ---------------------------------------------------------------------------
+  // Agent Self-Evolution tools (V0.2)
+  // ---------------------------------------------------------------------------
+  {
+    name: 'quota.report_exhaustion',
+    description:
+      'Agent Host calls this when it sees a quota error (HTTP 429 / 5-hour window). ' +
+      'Pauses all RUNNING tasks and resumes them when recovery_at elapses.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        provider: { type: 'string', description: 'e.g. "anthropic", "codex", "openai"' },
+        error: { type: 'string', description: 'The error message that triggered this' },
+        recovery_ms: { type: 'number', description: 'Expected recovery time in ms (default 5hr)' },
+        auto_detect: { type: 'boolean', description: 'If true, inspect the error for quota patterns first', default: true },
+      },
+      required: ['error'],
+    },
+  },
+  {
+    name: 'quota.status',
+    description: 'Get current API quota state (status / provider / recovery_at / hit_count).',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'quota.tick',
+    description:
+      'Check if quota has recovered. Call this from the agent loop every tick. ' +
+      'If recovered, releases all paused tasks back to PENDING.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'task.heartbeat',
+    description:
+      'Refresh heartbeat for a task (worker is alive). Extends lease_until automatically. ' +
+      'Workers should call this every 20-30s while working on a task.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string' },
+      },
+      required: ['task_id'],
+    },
+  },
+  {
+    name: 'agent.can_dispatch',
+    description:
+      'Quick check: can the scheduler pick new tasks right now? ' +
+      'Returns { ok: false, reason, resume_at } if quota exhausted and not yet recovered.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
 ];
 
 // =============================================================================
@@ -463,6 +532,55 @@ async function dispatchTool(name: string, args: any): Promise<unknown> {
       return githubForkRepo(args);
     case 'github.detect_local_repo':
       return githubDetectLocalRepo(args.cwd ?? process.cwd());
+
+    // -------------------------------------------------------------------------
+    // Agent Self-Evolution tools (V0.2)
+    // -------------------------------------------------------------------------
+    case 'quota.report_exhaustion': {
+      const error = args.error ?? '';
+      let provider = args.provider ?? 'unknown';
+
+      if (args.auto_detect !== false) {
+        const detected = detectQuotaError(error);
+        if (!detected.isQuota) {
+          return {
+            recorded: false,
+            reason: 'error did not match any known quota pattern — use auto_detect=false to force',
+            detected: { isQuota: false },
+          };
+        }
+        provider = args.provider ?? detected.provider;
+      }
+
+      const recoveryMs = args.recovery_ms ?? DEFAULT_QUOTA_RECOVERY_MS;
+      const state = recordExhaustion(store, {
+        provider,
+        error,
+        recoveryMs,
+        actor: 'mcp-agent-host',
+      });
+      return {
+        recorded: true,
+        provider: state.provider,
+        recovery_at: state.recovery_at,
+        hit_count: state.hit_count,
+      };
+    }
+    case 'quota.status':
+      return getQuotaState(store);
+    case 'quota.tick':
+      return tickQuotaRecovery(store);
+    case 'task.heartbeat': {
+      const task = taskHeartbeat(store, args.task_id, { pid: process.pid });
+      return {
+        task_id: task.id,
+        heartbeat_at: task.heartbeat_at,
+        lease_until: task.lease_until,
+      };
+    }
+    case 'agent.can_dispatch':
+      return canDispatch(store);
+
     default:
       throw new Error(`unknown tool: ${name}`);
   }

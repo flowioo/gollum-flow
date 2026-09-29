@@ -140,6 +140,12 @@ export interface Task {
   summary: string | null;
   last_observation: string | null;
   estimated_minutes: number | null;
+  /** V0.2 self-evolution: when worker last touched this task (heartbeat watchdog) */
+  heartbeat_at: string | null;
+  /** V0.2 self-evolution: PID of worker process that claimed this task */
+  worker_pid: number | null;
+  /** V0.2 self-evolution: hostname of worker (multi-machine safety) */
+  worker_host: string | null;
   version: number;
   created_at: string;
   updated_at: string;
