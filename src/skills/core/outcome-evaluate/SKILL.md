@@ -25,47 +25,51 @@ description: |
 outcome_id: string
 ```
 
-## Tools
+## CLI
 
-```
-outcome.get(outcome_id)              → Outcome + criteria[]
-outcome.remaining_gap(outcome_id)    → { total, pass, fail, unknown, unverified, remaining }
-criterion.list(outcome_id)
-criterion.get(criterion_id)
-evidence.list(criterion_id)
-outcome.mark_verified(outcome_id)    // 自动 VERIFIED 当所有 criterion PASS
+```bash
+gollum outcome show "$OUTCOME_ID"              # Outcome + criteria
+gollum outcome remaining-gap "$OUTCOME_ID"     # { total, pass, fail, unknown, unverified, remaining }
+gollum criterion list --outcome-id "$OUTCOME_ID"
+gollum evidence list
+gollum outcome mark-verified "$OUTCOME_ID"     # 所有 criterion PASS 时自动 VERIFIED
 ```
 
 ## Procedure
 
+```bash
+# 1. 拿到 Outcome + criteria
+gollum outcome show "$OUTCOME_ID"
+
+# 2. 看还差什么
+gollum remaining=$(
+gollum outcome remaining-gap "$OUTCOME_ID" | grep '"remaining"'
+)
+#   gap.remaining = fail + unknown + unverified
 ```
-1. outcome.get(outcome_id)
-   拿到 Outcome + criteria[]
-   ↓
-2. outcome.remaining_gap(outcome_id)
-   ↓
-   gap.remaining = fail + unknown + unverified
-   ↓
-3. 评估 Outcome.status：
-   a. 所有 criterion.derived_status == PASS
-      → outcome.mark_verified(outcome_id)
+
+```text
+3. 评估状态：
+   a. 所有 criterion PASS
+      → gollum outcome mark-verified "$OUTCOME_ID"
       → 触发 GOAL_ACHIEVED 检查
       → needs_new_task = false
-   b. 任一 criterion.derived_status == UNVERIFIED
+   b. 任一 criterion UNVERIFIED（没绑 verifier）
       → needs_new_task = false
-      → reason = "criterion missing verifier, attach verifier first"
-   c. 否则（还有 fail/unknown）
+      → 先补 verifier：
+        gollum criterion create -o "$OUTCOME_ID" -d "..." \
+          --verifier-type command --verifier-config '{"command":"npm test"}'
+   c. 还有 fail / unknown
+      → 有在跑的 task？gollum task list --outcome-id "$OUTCOME_ID"
+      → 有 → 继续推进那个
+      → 无 → 拆新 task：gollum task create -o "$OUTCOME_ID" -t "..." --acceptance "..."
       → needs_new_task = true
       → reason = "{remaining} criteria not PASS, need task to address them"
-   ↓
+```
+
+```text
 4. 返回结果给 Scheduler：
-   {
-     outcome_id,
-     status,
-     remaining_gap,
-     needs_new_task,
-     reason
-   }
+   { outcome_id, status, remaining_gap, needs_new_task, reason }
 ```
 
 ## 关键原则（V0.1 收敛版）

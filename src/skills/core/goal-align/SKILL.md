@@ -21,11 +21,59 @@ description: |
 
 ## Inputs
 
+```bash
+TASK_ID="<task_id>"     # 或直接给 <outcome_id> / <goal_id>
 ```
-task_id: string
-outcome_id: string
-goal_id: string
+
+## Procedure
+
+```bash
+# 一步到位：传 task_id，它会自己向上找 outcome / goal
+gollum goal-align "$TASK_ID"
 ```
+
+返回三态：
+
+```json
+{
+  "task_id": "...",
+  "objective": "aligned",      // 规则判定：所有 criterion PASS 且 outcome 已 VERIFIED
+  "llm": "misaligned",         // 语义判定：与 outcome 措辞无重叠
+  "verdict": "misaligned",
+  "reason": "objective=aligned (...); llm=misaligned (no word overlap ...)",
+  "confidence": 0.6
+}
+```
+
+`objective` 和 `llm` 是两路独立判断，`verdict` 取更保守的那个。**分歧时以你（Agent）的判断为准**，因为 `llm` 那路目前只是词面匹配。
+
+## 按 verdict 处理
+
+```text
+aligned     → 继续干活
+uncertain   → 说明理由给用户；或拆小 task；或先做 scout 调查
+misaligned  → gollum handle-misaligned "$TASK_ID"   # pause + rollback + 换 task
+```
+
+```bash
+# misaligned 的处理：不会升级找人，自己处理
+gollum handle-misaligned "$TASK_ID"
+```
+
+## 什么时候必须问人
+
+只有这些情况才需要停下来问用户：
+
+- 修改 Goal
+- 扩大 Scope
+- 删除关键 Outcome
+- 不可逆操作
+- 高风险行为
+- 无法判断的需求冲突
+
+其余的（跑偏了、该拆了）**自己处理**，不要甩给用户。
+
+> **Human 负责边界，Steward 负责日常纠偏。**
 
 ## Tools
 
@@ -129,5 +177,5 @@ emit TASK_REJECTED_MISALIGNED event
 调用完 `goal-align` 后必须：
 
 - 返回 verdict + reason
-- 落 Event
+- 检查 `gollum events list` 确认落了 `GOAL_ALIGNMENT_CHECKED` 事件
 - 调用方根据 verdict 执行下一步

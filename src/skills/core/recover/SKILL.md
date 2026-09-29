@@ -21,62 +21,73 @@ description: |
 
 ## Inputs
 
-```
-task_id: string
-failure_type: 'VERIFY_FAILED' | 'TOOL_ERROR' | 'CAS_THRASHING' | 'CRITERION_FAILED'
-error: Record<string, unknown>
+```bash
+TASK_ID="<task_id>"      # gollum task fail -r "<原因>" 之后调
 ```
 
 ## Procedure
 
+```bash
+# 1. Observe —— 先看现状，别猜
+gollum task show "$TASK_ID"
+gollum outcome remaining-gap <outcome_id>
 ```
-1. Observe
-   ↓ 重新读 Task + Outcome + Goal + 上次 Checkpoint
-2. Classify Failure
-   ↓ 分四类：
-   a. ENV_CHANGED     → Environment 漂移，重新 Observe
+
+```text
+2. Classify Failure（gollum 自动做，你负责执行它的决定）
+   ↓ 四类：
+   a. ENV_CHANGED     → 环境漂移，重新 Observe
    b. ASSERTION_FAIL  → 假设错了，换 Strategy
-   c. TOOL_ERROR      → Tool 调用失败，换 tool 或降级
-   d. CAS_THRASHING   → 竞争激烈，升级到 Planner 重新规划
+   c. TOOL_ERROR      → 工具失败，换工具或降级
+   d. CAS_THRASHING   → 竞争激烈，重新规划
    ↓
-3. Identify Divergence
-   ↓ 找出期望 vs 实际的差异点
-   ↓
-4. Change Strategy
+3. Change Strategy
    ↓ 至少改变以下之一：
       - 工具 / 参数
       - 执行顺序
       - 拆 Task 粒度
+```
       - 加 Criterion
    ↓
-5. Retry
+5. Retry —— 策略由 gollum 决定，别自己拍
    ↓
-   retry_count < 3  → 直接重试新策略
-   retry_count ≥ 3  → 升级到 Outcome 层决策
-   retry_count ≥ 5  → BLOCKED
-   ↓
-6. Verify
-   ↓ 用 verify Skill 重新验证
-   ↓
-   若 Outcome 已 achieved → task.complete 直接结束
-   若 Outcome 没变但 Task 在重试 → 策略根本错了
-   若 Goal 方向变了 → 升级到 Goal 层
+gollum recover "$TASK_ID"
 ```
 
-## Recovery 三大铁律
+`recover` 的自动策略：
 
+| `retry_count` | 策略 |
+|---|---|
+| < 3 | retry |
+| 3–4 | change_strategy |
+| ≥ 5 | block（等人工）|
+| CAS_THRASHING | 直接 change_strategy（不看次数）|
+
+```bash
+6. Verify —— 用新策略重跑校验
+   gollum verify command -c "npm test"
+   gollum outcome remaining-gap <outcome_id>
+   ↓
+   Outcome 已 achieved  → gollum task complete "$TASK_ID"，结束
+   Outcome 没变但 Task 在重试 → 策略根本错了，回到第 3 步换策略
+   Goal 方向变了       → 升级到 Goal 层（见下）
 ```
+
+## 恢复三大铁律
+
+```text
 1. 禁止完全相同动作无限重试
    至少改变 Strategy / 参数 / 顺序之一
 
-2. 重新 outcome-evaluate
+2. 重新评估 Outcome（gollum outcome remaining-gap）
    可能不是 Task 失败，而是：
-   - Outcome 已经 achieved（Task 应停止）
-   - Outcome 被 Goal 替代（方向变了）
-   - Outcome 没变化但 Task 在重试（策略错了）
+   - Outcome 已经 achieved（Task 该停）
+   - Outcome 被别的替代（方向变了）
+   - Outcome 没变但 Task 在重试（策略错了）
 
-3. 重新 goal-align
-   可能 Goal 方向变了，需要升级到 Goal 层决策
+3. 重新对齐 Goal（gollum goal-align "$TASK_ID"）
+   方向变了就该升级到 Goal 层决策
+```
 ```
 
 ## Failure 分类参考

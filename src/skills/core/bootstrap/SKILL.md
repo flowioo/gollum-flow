@@ -29,17 +29,23 @@ description: |
    ```
    Returns `{ project_id, source, repo_root }` or `{ project_id: null }` for unmanaged directories.
 
-2. **If project_id changed** (different from previous project):
-   a. Save a SessionEnd checkpoint for the old project via `gollum checkpoint save --phase "interrupted_by_switch"`.
-   b. Release the old project's lease via `gollum task release` (if held).
-   c. Load the new project's state.
+2. **If the current Project has unfinished work** (a task in RUNNING/RECOVERING
+   whose lease is stale):
+   a. Record where you stopped so a later session can pick it up:
+      ```bash
+      gollum task checkpoint <task_id> -s "切换前状态"
+      ```
+   b. Hand the lease back:
+      ```bash
+      gollum task wait <task_id>
+      ```
 
 3. **Load project state**:
    ```bash
-   gollum goal list
-   gollum outcome list --active
-   gollum task list --current
-   gollum evidence list --latest
+   gollum goal list --tree          # 全树，一眼看清 Goal→Outcome→Task
+   gollum task list --status RUNNING
+   gollum task list --status RECOVERING
+   gollum evidence list
    ```
 
 4. **Inject compact context** (do NOT inline in user-visible chat):
@@ -53,16 +59,20 @@ description: |
    ```
 
 5. **Select mode**:
-   - `managed` if there's an active `PENDING` or `IN_PROGRESS` task
+   - `managed` if there's an active `PENDING` or `RUNNING` task
    - `aware` otherwise (just discussion / exploration)
 
-## If `gollum init` (First Time)
+## First time in a directory
 
-If `gollum-resolver notify-cwd "$PWD"` returns `project_id: null` and the user wants to start a new project:
+If there is no Gollum state yet and the user wants to start tracking work here:
 
-1. Ask for `project name` and `goal`.
-2. Run `gollum init --name <name> --goal <goal>` — this creates `.gollum/project.yaml` and registers the project.
-3. Re-run resolver to load the new project.
+```bash
+gollum init          # 建默认 project + 跑 migration
+gollum project list   # 拿 project_id
+```
+
+`gollum init` takes no arguments — it creates the default project. Then use
+`gollum-plan` to turn what the user said into Goal / Outcome / Task.
 
 ## Outputs
 

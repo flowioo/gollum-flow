@@ -18,34 +18,38 @@ description: |
 - 每个 acceptance_criterion 必须有 evidence
 - Outcome VERIFIED 前需要确认所有 Criterion 派生状态正确
 
-## Tools
+## CLI
 
+```bash
+gollum verify command -c "<cmd>" [--cwd <path>] [--timeout <ms>] [--expect-exit <code>]
+gollum verify git --type status|diff|log [--repo <path>] [--expect-clean]
+gollum verify criterion <criterion_id>      # 按 criterion 绑定的 verifier 跑
+gollum evidence list
 ```
-verify.command     { command, cwd?, timeout? }
-verify.git         { type: status|diff|log, repo? }
-verify.outcome_criterion  { criterion_id }    // 调用 Criterion.verifier
-criterion.attach_evidence
-evidence.create
-```
+
+支持的 `criterion --verifier-type`：`command` / `git` / `outcome_criterion` /
+`timer_check` / `human_assert`
 
 ## Procedure
 
+```bash
+# 1. 拿 acceptance_criteria
+gollum task show "$TASK_ID"
 ```
-1. 拿到当前 Task 的 acceptance_criteria 列表
-   ↓
+
+```text
 2. 对每条 acceptance_criterion：
-   a. 选择 verify tool（按 PRD §7.3 五种 VerifierType）
-   b. 调用 verify tool → 得到 { status, evidence }
-   c. 若对应 Criterion 存在：
-      criterion.attach_evidence(criterion_id, evidence)
-      ↓
-      触发 derived_status 自动更新（DESIGN §5.3）
-   d. 若没对应 Criterion → evidence 直接挂 acceptance_criterion 名下
-   ↓
-3. outcome-evaluate 重新评估
-   ↓
-4. 若 remaining_gap.remaining == 0：
-   outcome.mark_verified(outcome_id)
+   a. 选 verify 方式，按 PRD §7.3 五种 VerifierType
+   b. 跑真实的校验命令，拿到输出当证据
+   c. 若有对应 Criterion，挂 evidence
+      gollum verify criterion <criterion_id>
+      → derived_status 自动更新（DESIGN §5.3）
+   d. 若没对应 Criterion → evidence 挂 acceptance_criterion 名下
+3. 重新评估：
+   gollum outcome remaining-gap <outcome_id>
+4. 若 remaining == 0 → 可以收工：
+   gollum task complete "$TASK_ID"
+   gollum outcome mark-verified "$OUTCOME_ID"   # 所有 criterion PASS 才有效
 ```
 
 ## Verification 返回值
