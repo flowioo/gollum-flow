@@ -10,11 +10,15 @@
  *   6. Project registry (count + recent)
  */
 
-import { existsSync, readlinkSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync, readlinkSync, statSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { homedir, platform } from 'node:os';
 import { getStore } from '../../workflow/store/store.js';
 import { listProjects } from '../../workflow/resolver.js';
+
+// dist/cli/commands/doctor.js → dist/skills/core
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const c = {
   reset: '\x1b[0m', green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m',
@@ -86,29 +90,37 @@ export async function runDoctor(): Promise<{ ok: boolean; report: string[] }> {
   }
 
   // 5. Skill links
+  // Derive the expected list from what actually shipped instead of hardcoding
+  // it — the list drifted once already (plan was added but doctor kept saying
+  // 7/7 while 8 skills were installed). An empty bundle is a hard error.
+  const skillsSrc = join(__dirname, '..', '..', 'skills', 'core');
+  const gollumSkills = existsSync(skillsSrc)
+    ? readdirSync(skillsSrc, { withFileTypes: true })
+        .filter((e) => e.isDirectory() && existsSync(join(skillsSrc, e.name, 'SKILL.md')))
+        .map((e) => e.name)
+        .sort()
+    : [];
+  if (gollumSkills.length === 0) {
+    err('no bundled skills found (dist/skills/core is empty — run `npm run build`)');
+    errors.push('bundled skills');
+  }
+
   let totalSkills = 0;
   for (const agent of detected) {
     const skillsDir = join(agent.dir, 'skills');
     if (!existsSync(skillsDir)) continue;
-    // Match by the skill's folder name in dist/skills/core/
-    const gollumSkills = [
-      'bootstrap',
-      'goal-align',
-      'task-run',
-      'task-resume',
-      'verify',
-      'recover',
-      'outcome-evaluate',
-    ];
-    let found = 0;
-    for (const s of gollumSkills) {
-      const link = join(skillsDir, s);
-      if (existsSync(link)) {
-        found++;
-      }
+    const missing = gollumSkills.filter((s) => !existsSync(join(skillsDir, s)));
+    const found = gollumSkills.length - missing.length;
+    // A partial install is not ok: reporting "1/8" as a pass is how a broken
+    // install hides. Only a completely absent set is a soft warning.
+    if (missing.length === 0) {
+      ok(`skills linked in ${agent.name}: ${found}/${gollumSkills.length}`);
+    } else if (found === 0) {
+      warn(`no Gollum skills found in ${agent.name} (run: gollum install-skills)`);
+    } else {
+      err(`skills incomplete in ${agent.name}: ${found}/${gollumSkills.length}, missing ${missing.join(', ')}`);
+      errors.push(`${agent.name} skills`);
     }
-    if (found > 0) ok(`skills linked in ${agent.name}: ${found}/${gollumSkills.length}`);
-    else warn(`no Gollum skills found in ${agent.name} (run: gollum install-skills)`);
     totalSkills = Math.max(totalSkills, found);
   }
   if (totalSkills === 0) warnings.push('no skills linked');
