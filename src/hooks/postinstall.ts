@@ -80,30 +80,48 @@ if (detected.length === 0) {
   info(`detected ${detected.map((a) => a.name).join(', ')}`);
 }
 
-// 4. Link bundled skills to each detected agent's skills directory
+// 4. Link bundled skills to each detected agent's skills directory.
+//
+// The bundle is dist/skills/core/<skill>/SKILL.md, so the skill directories are
+// one level *below* dist/skills. Linking dist/skills' immediate children here
+// produced a single useless `core` symlink per agent instead of the 8 real
+// skills, and left a junk entry that host skill discovery has to trip over.
+// `gollum install-skills` already recursed correctly; keep the two in sync.
 const BUNDLED_SKILLS_SRC = join(INSTALL_ROOT, 'skills');
-if (existsSync(BUNDLED_SKILLS_SRC)) {
+
+/** Collect real skill dirs (those containing a SKILL.md), recursing one level. */
+function collectSkills(root: string): { name: string; dir: string }[] {
+  if (!existsSync(root)) return [];
+  const out: { name: string; dir: string }[] = [];
+  for (const ent of readdirSync(root, { withFileTypes: true })) {
+    if (!ent.isDirectory()) continue;
+    const dir = join(root, ent.name);
+    if (existsSync(join(dir, 'SKILL.md'))) out.push({ name: ent.name, dir });
+    else out.push(...collectSkills(dir));
+  }
+  return out;
+}
+
+const bundledSkills = collectSkills(BUNDLED_SKILLS_SRC);
+if (bundledSkills.length === 0) {
+  warn(`bundled skills not found at ${BUNDLED_SKILLS_SRC} — run \`npm run build\` first`);
+} else {
   for (const agent of detected) {
     ensureDir(agent.skillsDir, `~/.${agent.name}/skills`);
-    const entries = readdirSync(BUNDLED_SKILLS_SRC, { withFileTypes: true });
-    for (const ent of entries) {
-      if (!ent.isDirectory()) continue;
-      const src = join(BUNDLED_SKILLS_SRC, ent.name);
-      const dst = join(agent.skillsDir, ent.name);
+    for (const skill of bundledSkills) {
+      const dst = join(agent.skillsDir, skill.name);
       if (existsSync(dst)) {
-        info(`exists  ~.${agent.name}/skills/${ent.name}`);
+        info(`exists  ~.${agent.name}/skills/${skill.name}`);
         continue;
       }
       try {
-        symlinkSync(src, dst, 'dir');
-        ok(`linked  ${colors.dim}~.${agent.name}/skills/${ent.name}${colors.reset} → ${colors.dim}${src}${colors.reset}`);
+        symlinkSync(skill.dir, dst, 'dir');
+        ok(`linked  ${colors.dim}~.${agent.name}/skills/${skill.name}${colors.reset} → ${colors.dim}${skill.dir}${colors.reset}`);
       } catch (e) {
         warn(`link failed for ${dst}: ${(e as Error).message}`);
       }
     }
   }
-} else {
-  warn(`bundled skills not found at ${BUNDLED_SKILLS_SRC} — run \`npm run build\` first`);
 }
 
 // 5. Print next steps

@@ -46,6 +46,19 @@ REAL_HOME="$HOME"
 rm -rf "$WORKDIR"
 mkdir -p "$TARBALL_DIR" "$INSTALL_PREFIX" "$FAKE_HOME"
 
+# Isolate HOME for the whole run, not per-command.
+#
+# Isolating only the commands that obviously needed it let an `npm install`
+# further down the script run with the real HOME, and its postinstall hook
+# provisioned the developer's real ~/.gollum and wrote skill symlinks into their
+# real ~/.claude, ~/.codex, ~/.cursor and ~/.mavis — while the script went on to
+# report PASSED. Step 7 asserts this never happens again.
+#
+# The npm cache stays on the real one so installs do not re-download the world;
+# the cache is a cache, not state this test is asserting on.
+export HOME="$FAKE_HOME"
+export npm_config_cache="${npm_config_cache:-$REAL_HOME/.npm}"
+
 echo "=== [1/6] Build ==="
 npm run build >/dev/null 2>&1
 echo "  ok"
@@ -140,6 +153,10 @@ echo "=== [3b/6] Assert postinstall has no ESM require() bug ==="
 # the developer's real ~/.gollum and step 5's doctor (which runs under the
 # isolated HOME) correctly reports it missing.
 export HOME="$FAKE_HOME"
+# postinstall only links into agent dirs that already exist. The isolated HOME
+# starts empty, so without this the hook links nothing and the assertions below
+# would pass vacuously. A real user running `npm install -g` does have ~/.claude.
+mkdir -p "$FAKE_HOME/.claude"
 set +e
 node "$INSTALL_PREFIX/node_modules/$PKG_NAME/dist/hooks/postinstall.js" >"$WORKDIR/postinstall.log" 2>&1
 PI_EXIT=$?
@@ -156,6 +173,24 @@ if grep -q "require is not defined" "$WORKDIR/postinstall.log"; then
 fi
 echo "  ✓ postinstall ran clean (exit 0, no ESM require error)"
 sed 's/^/    /' "$WORKDIR/postinstall.log" | head -3
+
+# postinstall used to link dist/skills' immediate children, i.e. the `core`
+# directory itself, so every install left one useless `core` symlink per agent
+# instead of the real skills. Assert on the skill dirs it actually created.
+FAKE_CLAUDE_SKILLS="$FAKE_HOME/.claude/skills"
+if [ -L "$FAKE_CLAUDE_SKILLS/core" ]; then
+  echo "  ✗ postinstall linked a bogus 'core' symlink instead of the real skills"
+  exit 1
+fi
+MISSING=""
+for s in bootstrap plan task-run task-resume verify recover outcome-evaluate goal-align; do
+  [ -e "$FAKE_CLAUDE_SKILLS/$s" ] || MISSING="$MISSING $s"
+done
+if [ -n "$MISSING" ]; then
+  echo "  ✗ postinstall did not link these skills:$MISSING"
+  exit 1
+fi
+echo "  ✓ postinstall linked 8 real skills, no bogus 'core' entry"
 
 echo
 echo "=== [3c/6] Assert postinstall provisioned the ISOLATED HOME ==="
@@ -270,6 +305,26 @@ else
 fi
 
 unset HOME
+echo
+echo "=== [7/7] The developer's real HOME was never written to ==="
+# Everything above runs under $FAKE_HOME except step 1a (fresh-clone install)
+# and the Claude step, which deliberately uses the real HOME. This asserts no
+# step quietly provisioned the real ~/.gollum or dropped a skill symlink there.
+# It is the check that was missing when postinstall leaked a `core` symlink into
+# ~/.claude/skills on every run and the E2E still reported PASSED.
+LEAKED=""
+[ -e "$REAL_HOME/.gollum/registry.yaml" ] || LEAKED="$LEAKED ~/.gollum/registry.yaml missing(unexpected)"
+for a in .claude .codex .cursor .mavis; do
+  for s in "$REAL_HOME/$a/skills/core"; do
+    [ -L "$s" ] && LEAKED="$LEAKED $s"
+  done
+done
+if [ -n "$LEAKED" ]; then
+  echo "  ✗ this run wrote into the real HOME:$LEAKED"
+  exit 1
+fi
+echo "  ✓ no stray symlinks in the real HOME agent skill dirs"
+
 echo
 echo "=== V0.2 E2E PASSED (isolated HOME, tarball-verified) ==="
 echo "workdir: $WORKDIR"

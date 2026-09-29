@@ -137,7 +137,7 @@ gollum recover <task_id>
 
 ```bash
 npm run typecheck
-npm test                      # 133 tests
+npm test                      # 140 tests
 npm run build
 bash tests/_v02_install_e2e.sh            # install E2E (isolated HOME, includes Claude)
 GOLLUM_E2E_SKIP_CLAUDE=1 bash tests/_v02_install_e2e.sh   # skip the Claude step
