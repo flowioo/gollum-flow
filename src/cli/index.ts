@@ -46,6 +46,14 @@ import { heartbeatCommand } from './commands/heartbeat.js';
 import { verifyByCriterion, verifyCommand, verifyGit } from '../core/verify.js';
 import { applyRecovery } from '../core/recover.js';
 import { goalAlign, handleMisaligned, handleUncertain } from '../core/goal-align.js';
+import {
+  githubSearchIssues,
+  githubGetIssue,
+  githubCreatePrCompare,
+  githubForkRepo,
+  githubDetectLocalRepo,
+  ghTokenSource,
+} from '../core/github.js';
 import { installCodex } from '../adapters/codex/installer.js';
 import { installClaude } from '../adapters/claude-code/installer.js';
 import type { Outcome, Task } from '../workflow/model/types.js';
@@ -702,6 +710,156 @@ program
       }
     }
     if (!result.ok) process.exit(1);
+  });
+
+// =============================================================================
+// github (issue → fix → draft PR 的 GitHub 侧)
+// =============================================================================
+// These were MCP tools before the MCP layer was removed; they had no CLI entry
+// point at all, so the "fix a GitHub issue" workflow had nowhere to start.
+// Token resolution: GITHUB_TOKEN → GH_TOKEN → `gh auth token`.
+
+const github = program
+  .command('github')
+  .description('GitHub operations used by the gollum-fix-issue skill');
+
+github
+  .command('auth')
+  .description('Show which GitHub credential gollum will use')
+  .action(() => {
+    const source = ghTokenSource();
+    const authenticated = source !== 'none';
+    console.log(
+      authenticated
+        ? `✓ authenticated via ${source}`
+        : '✗ no GitHub token (set GITHUB_TOKEN, or run `gh auth login`)',
+    );
+    if (!authenticated) {
+      console.log('  Read-only GitHub calls will work but are rate-limited to 60/hour.');
+    }
+    if (!authenticated) process.exitCode = 1;
+  });
+
+github
+  .command('search <query>')
+  .description('Search issues across all of GitHub')
+  .option('-l, --label <label...>', 'Filter by label(s)')
+  .option('--language <lang>', 'Filter by repository language')
+  .option('--state <state>', 'open | closed', 'open')
+  .option('--sort <field>', 'updated | created | comments', 'updated')
+  .option('--limit <n>', 'Max results (1-100)', '20')
+  .option('--json', 'Print raw JSON instead of a table')
+  .action(async (query: string, opts: {
+    label?: string[]; language?: string; state?: string; sort?: string; limit?: string; json?: boolean;
+  }) => {
+    const res = await githubSearchIssues({
+      query,
+      labels: opts.label,
+      language: opts.language,
+      state: (opts.state === 'closed' ? 'closed' : 'open'),
+      sort: (opts.sort === 'created' || opts.sort === 'comments' ? opts.sort : 'updated'),
+      per_page: Math.min(Math.max(Number(opts.limit ?? 20) || 20, 1), 100),
+    });
+    if (!res.ok) {
+      console.error(`✗ GitHub search failed: ${res.error}`);
+      process.exit(1);
+    }
+    if (opts.json) {
+      console.log(JSON.stringify(res, null, 2));
+      return;
+    }
+    console.log(`found ${res.total_count} issue(s), showing ${res.issues.length}`);
+    for (const i of res.issues) {
+      const labels = i.labels.length ? ` [${i.labels.join(', ')}]` : '';
+      console.log(`  ${i.owner}/${i.repo}#${i.number}  ${i.title}${labels}`);
+      console.log(`      ${i.html_url}`);
+    }
+    if (res.rate_limit_remaining !== undefined) {
+      console.log(`  rate limit remaining: ${res.rate_limit_remaining}`);
+    }
+  });
+
+github
+  .command('issue <repo> <number>')
+  .description('Read a single issue, including its full body')
+  .action(async (repoArg: string, numberArg: string) => {
+    const [owner, repo] = String(repoArg).split('/');
+    if (!owner || !repo) {
+      console.error('✗ expected owner/repo, e.g. cli/cli');
+      process.exit(1);
+    }
+    const res = await githubGetIssue({ owner, repo, issue_number: Number(numberArg) });
+    if (!res.ok || !res.issue) {
+      console.error(`✗ could not read issue: ${res.error}`);
+      process.exit(1);
+    }
+    const i = res.issue;
+    console.log(`#${i.number}  ${i.title}`);
+    console.log(`state: ${i.state}   labels: ${i.labels.join(', ') || '(none)'}   assignee: ${i.assignee ?? '(none)'}`);
+    console.log(`url:   ${i.html_url}`);
+    console.log(`\n${i.body || '(empty body)'}`);
+  });
+
+github
+  .command('fork <repo>')
+  .description('Fork a repository (needs a token with repo scope)')
+  .option('--org <org>', 'Fork into this organization')
+  .action(async (repoArg: string, opts: { org?: string }) => {
+    const [owner, repo] = String(repoArg).split('/');
+    if (!owner || !repo) {
+      console.error('✗ expected owner/repo, e.g. cli/cli');
+      process.exit(1);
+    }
+    const res = await githubForkRepo({ owner, repo, org: opts.org });
+    if (!res.ok || !res.fork_url) {
+      console.error(`✗ fork failed: ${res.error}`);
+      process.exit(1);
+    }
+    console.log(`✓ forked: ${res.fork_url}`);
+  });
+
+github
+  .command('pr <repo>')
+  .description('Open a pull request, or print a compare URL when unauthenticated')
+  .requiredOption('-H, --head <head>', 'Branch ref, e.g. "myuser:fix/typo"')
+  .requiredOption('-B, --base <base>', 'Base branch, e.g. "main"')
+  .requiredOption('-t, --title <title>', 'PR title')
+  .option('-b, --body <body>', 'PR body')
+  .option('--draft', 'Open as a draft PR')
+  .action(async (repoArg: string, opts: { head: string; base: string; title: string; body?: string; draft?: boolean }) => {
+    const [owner, repo] = String(repoArg).split('/');
+    if (!owner || !repo) {
+      console.error('✗ expected owner/repo, e.g. cli/cli');
+      process.exit(1);
+    }
+    const res = await githubCreatePrCompare({
+      owner, repo, head: opts.head, base: opts.base, title: opts.title, body: opts.body, draft: opts.draft,
+    });
+    console.log(`compare: ${res.compare_url}`);
+    if (res.pr_url) {
+      console.log(`pull request: ${res.pr_url}${opts.draft ? ' (draft)' : ''}`);
+    }
+    if (res.note) console.log(res.note);
+    if (res.error) {
+      console.error(`✗ ${res.error}`);
+      process.exit(1);
+    }
+  });
+
+github
+  .command('repo')
+  .description('Infer owner/repo and auth state for the current git repository')
+  .option('-C, --cwd <dir>', 'Directory to inspect', process.cwd())
+  .action((opts: { cwd: string }) => {
+    const r = githubDetectLocalRepo(opts.cwd);
+    if (!r.has_origin) {
+      console.error('✗ no git remote origin here');
+      process.exit(1);
+    }
+    console.log(`origin:  ${r.origin_url}`);
+    console.log(`repo:    ${r.inferred_owner}/${r.inferred_repo}`);
+    console.log(`ssh:     ${r.ssh_ok ? 'ok' : 'unavailable'}`);
+    console.log(`token:   ${ghTokenSource()}`);
   });
 
 // =============================================================================

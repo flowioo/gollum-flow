@@ -1,21 +1,52 @@
 /**
- * GitHub Tools for gollum MCP (V0.5)
+ * GitHub Tools for gollum (V0.5)
  *
  * Exposes minimal GitHub operations needed to find and fix a bug → submit PR:
- *   github.search_issues        — 搜 open issues (good-first-issue 等)
- *   github.get_issue            — 读单个 issue（含 body / labels / state）
- *   github.create_pr_compare    — 生成 compare URL（无需 token）；实际 PR 提交靠 gh/web
+ *   gollum github search        — 搜 open issues (good-first-issue 等)
+ *   gollum github issue         — 读单个 issue（含 body / labels / state）
+ *   gollum github pr-compare    — 提 PR（有 token 时直接 POST）或生成 compare URL
+ *   gollum github fork          — fork 仓库
+ *   gollum github repo          — 推断当前仓库的 owner/repo
  *
- * Auth: 优先 GITHUB_TOKEN (PAT)；缺失则降级到 unauthenticated（rate-limited 60/h）。
- *       create_pr_compare 不需要 token；它只生成 URL。
- *
- * 真实提 PR 仍需在 CC 里配 GITHUB_TOKEN 或 `gh auth login`。
+ * Auth 优先级：GITHUB_TOKEN → GH_TOKEN → `gh auth token`（读 gh 的 keyring）。
+ * 之前只看前两个环境变量，而绝大多数人只跑过 `gh auth login` —— token 在 gh 的
+ * keyring 里，不在环境里，于是每个调用都掉到未认证配额（60 次/小时），全局搜
+ * issue 跑不了几轮就 403。
+ * 全部缺失时降级为 unauthenticated，只做只读操作。
  */
 
 import { execSync } from 'node:child_process';
 
 const GH_API = 'https://api.github.com';
-const GH_TOKEN = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
+
+let cachedToken: string | undefined;
+
+/**
+ * Resolve a GitHub token, preferring explicit env vars and falling back to the
+ * `gh` CLI's credential store. Returns '' when nothing is available.
+ * Cached: `gh auth token` shells out, and every API call needs this.
+ */
+export function resolveGhToken(): string {
+  if (cachedToken !== undefined) return cachedToken;
+  const fromEnv = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
+  if (fromEnv) {
+    cachedToken = fromEnv;
+    return cachedToken;
+  }
+  try {
+    const out = execSync('gh auth token', { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+    cachedToken = out.trim();
+  } catch {
+    cachedToken = '';
+  }
+  return cachedToken;
+}
+
+export function ghTokenSource(): 'GITHUB_TOKEN' | 'GH_TOKEN' | 'gh auth token' | 'none' {
+  if (process.env.GITHUB_TOKEN) return 'GITHUB_TOKEN';
+  if (process.env.GH_TOKEN) return 'GH_TOKEN';
+  return resolveGhToken() ? 'gh auth token' : 'none';
+}
 
 function ghHeaders(): Record<string, string> {
   const h: Record<string, string> = {
@@ -23,7 +54,8 @@ function ghHeaders(): Record<string, string> {
     'X-GitHub-Api-Version': '2022-11-28',
     'User-Agent': 'gollum-cli/0.2',
   };
-  if (GH_TOKEN) h['Authorization'] = `Bearer ${GH_TOKEN}`;
+  const tok = resolveGhToken();
+  if (tok) h['Authorization'] = `Bearer ${tok}`;
   return h;
 }
 
@@ -44,6 +76,9 @@ export interface GitHubIssue {
   state: 'open' | 'closed';
   html_url: string;
   repository_url: string;
+  /** owner/repo parsed out of repository_url, so callers can act without re-parsing. */
+  owner: string;
+  repo: string;
   labels: string[];
   assignee: string | null;
   created_at: string;
@@ -80,18 +115,23 @@ export async function githubSearchIssues(args: SearchIssuesArgs): Promise<Search
       return { ok: false, total_count: 0, issues: [], rate_limit_remaining: rl ? Number(rl) : undefined, error: `HTTP ${resp.status}: ${text.slice(0, 200)}` };
     }
     const data = await resp.json() as any;
-    const issues: GitHubIssue[] = (data.items ?? []).map((it: any) => ({
-      number: it.number,
-      title: it.title,
-      state: it.state,
-      html_url: it.html_url,
-      repository_url: it.repository_url,
-      labels: (it.labels ?? []).map((l: any) => typeof l === 'string' ? l : l.name),
-      assignee: it.assignee?.login ?? null,
-      created_at: it.created_at,
-      updated_at: it.updated_at,
-      body_excerpt: (it.body ?? '').slice(0, 500),
-    }));
+    const issues: GitHubIssue[] = (data.items ?? []).map((it: any) => {
+      const [owner = '', repo = ''] = String(it.repository_url ?? '').split('/repos/')[1]?.split('/') ?? [];
+      return {
+        number: it.number,
+        title: it.title,
+        state: it.state,
+        html_url: it.html_url,
+        repository_url: it.repository_url,
+        owner,
+        repo,
+        labels: (it.labels ?? []).map((l: any) => typeof l === 'string' ? l : l.name),
+        assignee: it.assignee?.login ?? null,
+        created_at: it.created_at,
+        updated_at: it.updated_at,
+        body_excerpt: (it.body ?? '').slice(0, 500),
+      };
+    });
     return { ok: true, total_count: data.total_count ?? issues.length, issues, rate_limit_remaining: rl ? Number(rl) : undefined };
   } catch (e: any) {
     return { ok: false, total_count: 0, issues: [], error: e.message ?? String(e) };
@@ -120,6 +160,8 @@ export async function githubGetIssue(args: GetIssueArgs): Promise<{ ok: boolean;
         state: it.state,
         html_url: it.html_url,
         repository_url: it.repository_url,
+        owner: args.owner,
+        repo: args.repo,
         labels: (it.labels ?? []).map((l: any) => typeof l === 'string' ? l : l.name),
         assignee: it.assignee?.login ?? null,
         created_at: it.created_at,
@@ -189,12 +231,14 @@ export interface CreatePrCompareArgs {
   base: string;          // e.g. "main"
   title: string;
   body?: string;
+  draft?: boolean;       // open as a draft PR (default false)
 }
 
 export interface CreatePrCompareResult {
   ok: boolean;
   compare_url: string;
   web_pr_url: string;
+  pr_url?: string;       // set when the API actually created the PR
   note: string;
   error?: string;
 }
@@ -215,7 +259,7 @@ export async function githubCreatePrCompare(args: CreatePrCompareArgs): Promise<
     note: '',
   };
 
-  if (GH_TOKEN) {
+  if (resolveGhToken()) {
     // Has token: actually POST the PR
     try {
       const resp = await fetch(`${GH_API}/repos/${args.owner}/${args.repo}/pulls`, {
@@ -226,11 +270,13 @@ export async function githubCreatePrCompare(args: CreatePrCompareArgs): Promise<
           head: args.head,
           base: args.base,
           body: args.body ?? '',
+          draft: args.draft ?? false,
         }),
       });
       if (resp.ok) {
         const pr = await resp.json() as any;
-        result.note = `PR submitted via API: ${pr.html_url}`;
+        result.note = `PR submitted via API: ${pr.html_url}${pr.draft ? ' (draft)' : ''}`;
+        result.pr_url = pr.html_url;
         return result;
       }
       result.error = `API PR failed: HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`;
@@ -238,7 +284,7 @@ export async function githubCreatePrCompare(args: CreatePrCompareArgs): Promise<
       result.error = e.message ?? String(e);
     }
   } else {
-    result.note = 'No GITHUB_TOKEN. Generated compare URL only. User must click to open PR in browser.';
+    result.note = 'No GitHub token. Generated compare URL only. User must click to open PR in browser.';
   }
   return result;
 }
@@ -250,12 +296,12 @@ export interface ForkRepoArgs {
 }
 
 /**
- * Fork a repo using GITHUB_TOKEN. Returns HTML URL of new fork.
- * Requires token with repo scope.
+ * Fork a repo using a GitHub token. Returns HTML URL of new fork.
+ * Requires a token with repo scope.
  */
 export async function githubForkRepo(args: ForkRepoArgs): Promise<{ ok: boolean; fork_url?: string; error?: string }> {
-  if (!GH_TOKEN) {
-    return { ok: false, error: 'No GITHUB_TOKEN. Cannot fork via API. User must click "Fork" on GitHub.' };
+  if (!resolveGhToken()) {
+    return { ok: false, error: 'No GitHub token. Run `gh auth login`, or use `gh repo fork` instead. Cannot fork via API.' };
   }
   const url = `${GH_API}/repos/${args.owner}/${args.repo}/forks`;
   try {

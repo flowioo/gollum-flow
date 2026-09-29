@@ -87,7 +87,7 @@ go `PENDING → DONE` directly — you must `claim` it first.
 
 ## Skills
 
-Eight skills ship inside the npm package at `dist/skills/core/`, each with YAML
+Eight core skills plus a GitHub issue workflow ship inside the npm package at `dist/skills/core/`, each with YAML
 frontmatter so hosts can discover them:
 
 | Directory | `name:` | what it is for |
@@ -100,9 +100,37 @@ frontmatter so hosts can discover them:
 | `recover` | `gollum-recover` | recover a failed task |
 | `outcome-evaluate` | `gollum-outcome-evaluate` | report remaining gap on an outcome |
 | `goal-align` | `gollum-goal-align` | detect scope creep on a task |
+| `fix-issue` | `gollum-fix-issue` | search a GitHub issue → fix → verify → open a **draft** PR |
 
 Every command and flag these skills name is checked against the real CLI by
 `tests/skills-contract.test.ts`, which also covers this README.
+
+## Fix a GitHub issue from one sentence
+
+```text
+修一下 github issue cli/cli#11014
+找个 typo 的 good-first-issue 修一下
+```
+
+The `gollum-fix-issue` skill runs the whole loop: search issues across GitHub →
+plan the fix as Goal/Outcome/Task → reproduce the bug on a branch → implement →
+run the real verification command → attach evidence → push to a fork → open a
+**draft** PR → stop and report.
+
+It never opens a ready-for-review PR on its own, and never opens one without
+having actually run the verification.
+
+```bash
+gollum github auth                      # which credential will be used
+gollum github search "flaky test" --limit 10
+gollum github search "typo" --label good-first-issue
+gollum github issue cli/cli 11014       # full issue body
+gollum github repo                      # owner/repo of the current checkout
+```
+
+Auth resolves in order: `GITHUB_TOKEN` → `GH_TOKEN` → `gh auth token` (so a
+machine that only ran `gh auth login` still works). Unauthenticated calls fall
+back to read-only and get GitHub's 60/hour anonymous limit.
 
 `npx skills add <github-repo>` is **not** used — it requires a GitHub repo as the
 skill source, while these skills ship in the npm tarball.
@@ -137,7 +165,7 @@ gollum recover <task_id>
 
 ```bash
 npm run typecheck
-npm test                      # 140 tests
+npm test                      # 158 tests
 npm run build
 bash tests/_v02_install_e2e.sh            # install E2E (isolated HOME, includes Claude)
 GOLLUM_E2E_SKIP_CLAUDE=1 bash tests/_v02_install_e2e.sh   # skip the Claude step
