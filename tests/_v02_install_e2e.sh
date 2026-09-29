@@ -45,6 +45,29 @@ npm run build >/dev/null 2>&1
 echo "  ok"
 
 echo
+echo "=== [1a/6] Fresh-clone `npm install` must not fail ==="
+# Regression guard: postinstall pointed at ./dist/hooks/postinstall.js, which
+# does not exist in a fresh clone (dist/ is gitignored), so `npm install`
+# exited 1 with MODULE_NOT_FOUND. The E2E never caught it because it packed
+# *after* building. `prepare` now builds dist; the postinstall hook also
+# guards on existence. Test the real user path: clone -> npm install.
+CLONE_DIR="$WORKDIR/clone"
+git clone -q "$ROOT" "$CLONE_DIR"
+# Its postinstall must not touch the developer's real ~/.gollum.
+set +e
+( cd "$CLONE_DIR" && HOME="$FAKE_HOME" npm install --no-audit --no-fund ) \
+  >"$WORKDIR/clone-install.log" 2>&1
+CLONE_EXIT=$?
+set -e
+if [ "$CLONE_EXIT" -ne 0 ]; then
+  echo "  ✗ npm install in a fresh clone exited $CLONE_EXIT"
+  tail -20 "$WORKDIR/clone-install.log" | sed 's/^/    /'
+  exit 1
+fi
+[ -f "$CLONE_DIR/dist/cli/index.js" ] || { echo "  ✗ dist/cli/index.js missing after install"; exit 1; }
+echo "  ✓ fresh clone: npm install exit 0, dist built by prepare"
+
+echo
 echo "=== [2/6] Pack tarball ==="
 npm pack --pack-destination "$TARBALL_DIR" 2>&1 | tail -2
 TARBALL="$(ls "$TARBALL_DIR"/${PKG_NAME}-*.tgz | head -1)"

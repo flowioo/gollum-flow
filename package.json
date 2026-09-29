@@ -33,8 +33,9 @@
     "test:watch": "tsx --test --watch tests/*.test.ts",
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",
+    "prepare": "npm run build",
     "prepublishOnly": "npm run build && npm test",
-    "postinstall": "node ./dist/hooks/postinstall.js"
+    "postinstall": "node -e \"const f='./dist/hooks/postinstall.js';import('node:fs').then(fs=>{if(fs.existsSync(f))import(f);else console.log('[gollum] dist not built; skipping postinstall. Run: npm run build')})\""
   },
   "dependencies": {
     "commander": "^12.0.0",
