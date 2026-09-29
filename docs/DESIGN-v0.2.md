@@ -939,19 +939,28 @@ tail -f ~/.gollum/runtime/events/2026-09-28.yaml
 
 ---
 
-## 12. 与 V0.1 的差异
+## 12. V0.2 实际变更 vs V0.1
 
-| 维度 | V0.1 | V0.2 |
+> ⚠️ 下表只列 **V0.2 真实代码改动**。本文档 §2 / §4 描述的
+> 「`~/.gollum/proj_<id>/` YAML 分目录 + flock CAS + registry.yaml 索引」
+> 是原始设计，**V0.2 没有实现**，状态层沿用 V0.1 的 SQLite。
+
+| 维度 | V0.1 | V0.2 实际 |
 |---|---|---|
-| 全局目录 | `~/.steward/` | `~/.gollum/` |
-| Registry | `registry.db`（SQLite） | `registry.yaml`（人类可读）|
-| Store | 单一 `store.db` | `~/.gollum/proj_<id>/` 按项目分目录 |
-| State 格式 | 表 + 字段 | YAML 文件 + `version` 字段 |
-| CAS | SQLite 事务 | `flock` + 原子 rename |
-| Verify 形式化 | 口号 | Verify 类型白名单 + Evidence 强引用 |
-| Goal 保护 | 无 | 30 天锁 + 必须 ack |
-| firstmate 整合 | 无 | 6 个具体模式借鉴 |
-| Goal Alignment | 有 | 加 Outcome 服务 Goal 检查 |
+| npm 包 | `private: true`，不可发布 | `gollum-flow@0.2.0`，publishable（**尚未 publish**）|
+| bin 入口 | 仅 `gollum` | + `gollum-resolver` / `gollum-store` |
+| postinstall | 无 | `src/hooks/postinstall.ts`，建 `~/.gollum/` + 软链 skills |
+| 自检 | 无 | `gollum doctor`（6 项）|
+| 手动装 skills | 无 | `gollum install-skills`（幂等，`lstat` 区分 symlink）|
+| Skills 可被发现 | ❌ SKILL.md 无 frontmatter | ✅ 7 个带 `name` + `description` |
+| Project 解析 | 无 | `src/workflow/resolver.ts` + `gollum resolver` |
+| **Store** | `node:sqlite` 单库 | **不变**（仍是 `node:sqlite`）|
+| **CAS** | SQLite 版本号 CAS | **不变** |
+| **Registry** | SQLite `projects` 表 | **不变**（`registry.yaml` 仅由 postinstall 建空壳）|
+| **Verify / Goal Align / Scope Creep** | 已实现 | **不变**（V0.1 已有）|
+
+**V0.2 实际只做了一件事**：给 V0.1 已有的状态层加上一层 npm 分发 + Skills 可发现性。
+状态模型（Goal/Outcome/Task/Evidence/Checkpoint）**没有变化**。
 
 ---
 

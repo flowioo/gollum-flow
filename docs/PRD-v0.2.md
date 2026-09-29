@@ -139,40 +139,55 @@ $ cd ~/code/project-c && hermes    # Project C
 
 ### 5.1 P0 — V0.1 必须有
 
-| 功能 | 描述 | 验收标准 |
+| 功能 | 描述 | 状态 | 实际 |
+|---|---|---|---|
+| F1. Project Init | `gollum init` 创建项目 + Goal | ✅ V0.1 | SQLite `projects` 表 |
+| F2. Project Resolver | 向上递归查找 project.yaml | ✅ V0.2 | `src/workflow/resolver.ts`，兼容 `.gollum/` 与 `.steward/` |
+| F3. Bootstrap | Host 启动后加载 Goal/Outcome/Task | ⚠️ 部分 | skill 已写；自动触发依赖宿主加载 skill，**无强制注入** |
+| F4. Project Switch | 跨项目切换自动 Checkpoint + Lease 释放 | ❌ 未实现 | 切换协议缺失 |
+| F5. State 持久化 | Goal/Outcome/Task/Evidence/Checkpoint 落盘 | ✅ V0.1 | **SQLite**（`~/.local/share/gollum/gollum.db`），非 `~/.gollum/proj_<id>/` YAML |
+| F6. CAS 更新 | 版本号 Compare-And-Swap | ✅ V0.1 | SQLite 版本 CAS，**非** flock + atomic rename |
+| F7. Goal/Outcome/Task 工具 | `gollum goal.*` / `outcome.*` / `task.*` | ✅ V0.1 | CLI 全套 |
+| F8. Evidence 工具 | `gollum evidence.*` 关联 Task | ✅ V0.1 | CLI |
+| F9. Checkpoint | task 的 `checkpoint` 字段 | ✅ V0.1 | **非** 独立命令 `gollum checkpoint.*` |
+| F10. Registry | 项目索引 | ⚠️ 部分 | `registry.yaml` 由 postinstall 建空壳；真实索引仍在 SQLite `projects` 表，且 `gollum init` **不写** registry.yaml |
+
+### 5.2 原定 P1 范围 — 交付情况
+
+> 本节列出**文档最初规划的 P1 范围**及其实际交付状态。
+> **V0.2 只完成了「npm 分发 + Skills 可发现」这一层，原定 6 项中交付 4 项。**
+> 重新编号（已交付 → F11–F14，未实现 → F15–F18）**不改变**这一事实，
+> 只是为了避免编号重复。
+
+| 原编号 | 功能 | 状态 | 证据 / 缺口 |
+|---|---|---|---|
+| F11 | AGENTS.md 入口模板 | ❌ 未实现 | 现为 F15；`src/templates/` 不存在 |
+| F12 | ship/scout 任务分类 | ❌ 未实现 | 现为 F16；`types.ts` 无 `shape` 字段 |
+| F13 | bash watcher | ❌ 未实现 | 现为 F17；无实现 |
+| F14 | Memory 基础读写 | ❌ 未实现 | 现为 F18；CLI 无此命令 |
+| — | Skills 可被宿主加载 | ✅ 已实现 | 7 个 SKILL.md 带 frontmatter；E2E 步骤 4a 审计软链 realpath 落在 tarball 内 |
+| — | `gollum doctor` 自检 | ✅ 已实现 | `src/cli/commands/doctor.ts` |
+| — | `gollum install-skills` | ✅ 已实现 | `src/cli/commands/install-skills.ts`（幂等，`lstat` 区分 symlink）|
+| — | `gollum-resolver` 解析入口 | ✅ 已实现 | `src/workflow/resolver.ts` + `src/cli/gollum-resolver.ts`；**shell hook 需用户自行配置** |
+
+**另有两项 V0.2 必须做但未完成**：
+
+| 项 | 状态 | 说明 |
 |---|---|---|
-| F1. Project Init | `gollum init` 在当前目录创建 `.steward/project.yaml` + 注册到 Registry | 在新 Repo 跑 init，文件创建 + Registry 条目存在 |
-| F2. Project Resolver | 向上递归查找 `.steward/project.yaml` | 在子目录能识别出父 Project；走到项目外识别为 unmanaged |
-| F3. Bootstrap | Host 启动后自动加载当前 Project 的 Goal/Outcome/Task | 启动 Codex 后看到 [Gollum] Context Injection 输出 |
-| F4. Project Switch | 跨项目切换时自动 Checkpoint + Lease 释放 | cd 到另一个 Project 目录后看到 switch 提示，老 Project 有 checkpoint |
-| F5. State 持久化 | Goal / Outcome / Task / Evidence / Checkpoint 写入 `~/.gollum/proj_<id>/` | ls 看得到目录结构，YAML 文件可读 |
-| F6. CAS 更新 | 用 `version` 字段 + flock + atomic rename 实现 Compare-And-Swap | 并发写入测试：模拟两个写入竞争，一个成功一个重试 |
-| F7. Goal/Outcome/Task 工具 | `gollum goal.*` / `outcome.*` / `task.*` 命令 | CLI 能创建 / 列出 / 更新任务 |
-| F8. Evidence 工具 | `gollum evidence.add` 关联 Task | evidence YAML 写入，含 artifact 路径 |
-| F9. Checkpoint 工具 | `gollum checkpoint.save` / `checkpoint.load` | 切换目录后老 Project 有新 checkpoint |
-| F10. Registry | `~/.gollum/registry.yaml` 维护所有 Project | vim 可读，新增 init 自动注册 |
+| `npm publish` | ❌ 未执行 | 包名 `gollum` 被占，改名 `gollum-flow`；需 `npm login` 后人工发布 |
+| registry 安装路径验证 | ❌ 未验证 | 只验证了本地 tarball 安装；`npm install -g gollum-flow` 未跑过 |
 
-### 5.2 P1 — 已交付
+### 5.3 V0.2 未实现项汇总（V0.3 候选）
 
-| 功能 | 状态 | 证据 |
-|---|---|---|
-| F11. Skills 可被宿主加载 | ✅ 已实现 | 7 个 SKILL.md 带 frontmatter；E2E 证明 Claude 读到 tarball 安装的 skill |
-| F12. `gollum doctor` 自检 | ✅ 已实现 | `src/cli/commands/doctor.ts`（Node/目录/store/宿主/skills/项目 六项） |
-| F13. `gollum install-skills` | ✅ 已实现 | `src/cli/commands/install-skills.ts`（幂等，`lstat` 区分 symlink） |
-| F14. `gollum-resolver` shell hook 入口 | ✅ 已实现 | `src/workflow/resolver.ts` + `src/cli/gollum-resolver.ts` |
-
-### 5.3 P1 — 未实现（文档先行，代码待补）
-
-> 以下功能在本文档中已定义，但 **V0.2 代码中尚不存在**。不要按它们编写集成。
-
-| 功能 | 描述 | 状态 |
-|---|---|---|
-| F15. AGENTS.md 入口模板 | `templates/AGENTS.md` | ❌ `src/templates/` 不存在 |
-| F16. ship/scout 任务分类 | Task 模型加 `shape` 字段 | ❌ `types.ts` 无该字段 |
-| F17. bash watcher | 状态文件变化触发唤醒 | ❌ 无实现 |
-| F18. Memory 基础读写 | `gollum memory.read/write` | ❌ CLI 无此命令 |
-
-> F15–F18 原编号为 F11–F14，与 §5.2 已交付项重新编号后不冲突。
+| 功能 | 描述 |
+|---|---|
+| F15. AGENTS.md 入口模板 | `templates/AGENTS.md` |
+| F16. ship/scout 任务分类 | Task 模型加 `shape` 字段 |
+| F17. bash watcher | 状态文件变化触发唤醒 |
+| F18. Memory 基础读写 | `gollum memory.read/write` |
+| — | `npx skills add` 集成（PRD §6.1 已移除该路径）|
+| — | Project Switch Protocol（切目录时 checkpoint + 释放 lease）|
+| — | shell hook 自动安装（`gollum init --install-hook`）|
 
 ### 5.4 已由 V0.1 提供（V0.2 未改动）
 
@@ -180,6 +195,8 @@ $ cd ~/code/project-c && hermes    # Project C
 |---|---|
 | Goal Alignment 三态 | `src/mcp/core/goal-align.ts` |
 | Scope Creep 关键词检测 | `goal-align.ts:81` |
+| Verify / Evidence / CAS / Lease | `src/mcp/core/verify.ts`、`src/workflow/store/store.ts` |
+| 状态存储 | SQLite（`node:sqlite` + WAL），**非** `~/.gollum/proj_<id>/` YAML |
 
 ### 5.5 P2 — V0.3+
 
@@ -254,14 +271,14 @@ $ codex   # 或 claude / hermes / mavis
 **升级路径**：
 
 ```bash
-# 升级 Runtime
-$ npm update -g gollum
+# 升级 Runtime（发布后生效）
+$ npm update -g gollum-flow
 
-# 升级 Skills
-$ npx skills update
-# 或单独升级
-$ npx skills add kunchenguid/gollum -g --update
+# 升级 Skills（Skills 随包分发，重装即更新）
+$ gollum install-skills
 ```
+
+> ❌ `npx skills update` / `npx skills add ... --update` **不可用**（该机制未集成）。
 
 ### 6.2 日常使用
 
@@ -298,36 +315,33 @@ $ codex
 
 ---
 
-## 7. 验收标准（V0.1）
+## 7. 验收标准
 
-### 7.1 多项目自动识别
+### 7.1 V0.2 已验证
 
-- [ ] 同 Project 内子目录切换：**no-op**，Project 不变
-- [ ] 跨 Project 切换：自动触发 Checkpoint + Lease 释放 + Context 替换
-- [ ] 未注册目录：进入 unmanaged mode，禁止写 Store
-- [ ] Monorepo 子目录：找到最近的 `.steward/project.yaml` 即停
+- [x] `npm pack` 产出的 tarball 含 7 个 `SKILL.md`（E2E 步骤 2a）
+- [x] `postinstall` 在干净环境下 exit 0，无 ESM 错误，建出 `~/.gollum/` 结构（步骤 3a/3b）
+- [x] `gollum install-skills` 的 7 条软链 realpath 全部落在 tarball 安装目录内，**不指向开发树**（步骤 4a）
+- [x] `gollum doctor` 在隔离 HOME 下全绿（步骤 5）
+- [x] Claude Code 能读到 tarball 安装的 `SKILL.md` 并复述 frontmatter（步骤 6）
+- [x] 干净 clone 可 typecheck + 77 单测全绿
 
-### 7.2 跨 Host 接力
+### 7.2 跨 Session 恢复（V0.1 已验证）
 
-- [ ] Codex 跑完 task-001 → 退出 → Claude Code 进来继续 task-001
-- [ ] 不同 Host 看到同一份 Goal / Outcome / Task
+- [x] 关闭 Host → 重新启动 → 看到 Project 状态（`tests/_process_a.ts` + `_process_b.ts`）
+- [x] CAS 冲突按 reload + backoff 1-3s + ≤3 次处理（`tests/cas.test.ts`）
+- [x] Lease 过期可被重新接管（`tests/scheduler.test.ts`）
+- [x] 单项目完整生命周期（`tests/_v01_demo.mts`）
 
-### 7.3 跨 Session 恢复
+### 7.3 未验证（V0.2 缺口）
 
-- [ ] 关闭 Host → 重新启动 → 立即看到 Project 状态
-- [ ] 三个月未访问的 Project → 仍能加载 Goal 和历史 Evidence
-
-### 7.4 防跑偏
-
-- [ ] Task 完成 → 自动跑 Goal Alignment
-- [ ] Outcome 完成 → 必须所有 Criteria verified
-- [ ] Goal 修改必须显式 ack
-
-### 7.5 可验证
-
-- [ ] 每个 Task 完成必须挂 Evidence ID
-- [ ] Evidence 必须有 artifact 路径 + verifier 类型
-- [ ] "Agent says done" 不算完成，必须 Verify 通过
+- [ ] `npm install -g gollum-flow`（registry 路径，未 publish）
+- [ ] 同 Project 内子目录切换 no-op（resolver 已实现，切换行为未测）
+- [ ] 跨 Project 切换自动 Checkpoint + Lease 释放（**切换协议未实现**）
+- [ ] 未注册目录进入 unmanaged mode（**未实现**）
+- [ ] Monorepo 子目录就近命中（resolver 已实现，未专门测）
+- [ ] 跨 Host 接力（Codex → Claude Code 同一 task）
+- [ ] Goal 修改必须显式 ack（V0.1 有 `requires_ack` 字段，无强制机制）
 
 ---
 
@@ -367,19 +381,34 @@ Evidence 回收 → Gollum 验证 Outcome
 
 ---
 
-## 10. V0.1 时间表（建议）
+## 10. V0.2 实际交付 vs 原计划
 
-| Week | Deliverable |
-|---|---|
-| W1 | `~/.gollum/` 目录骨架 + Project Init 命令 |
-| W2 | Project Resolver + Bootstrap 流程 |
-| W3 | State YAML + CAS 写入 + flock |
-| W4 | Goal/Outcome/Task/Evidence/Checkpoint 工具 |
-| W5 | Goal Alignment v1 + Verify 类型白名单 |
-| W6 | E2E 测试：单项目 + 跨项目切换 + 跨 Session 恢复 |
+| 原计划 | 实际 | 状态 |
+|---|---|---|
+| npm 包骨架 + publish | 包骨架完成（`gollum-flow@0.2.0`）；**publish 未执行** | ⚠️ |
+| Skills 随 `npx skills add` 分发 | 改为随 npm tarball 分发 + postinstall 软链 | ✅（设计变更）|
+| Init + Bootstrap | `gollum init` 由 V0.1 提供；Bootstrap skill 已写 | ⚠️ |
+| State YAML + flock CAS | 沿用 V0.1 SQLite + 版本 CAS | ✅（设计变更）|
+| Goal/Outcome/Task/Evidence/Checkpoint 工具 | V0.1 已提供 | ✅ |
+| Goal Alignment + Verify 白名单 | V0.1 已提供 | ✅ |
+| Resolver | `gollum resolver` 完成；**shell hook 需手动配** | ⚠️ |
+| 安装 E2E | 隔离 HOME + tarball 软链审计 + Claude 读取，全绿 | ✅ |
+| 跨项目切换 E2E | **切换协议未实现** | ❌ |
+
+### V0.3 建议顺序
+
+1. `npm publish`（解锁 registry 安装路径）
+2. Project Switch Protocol（切目录时 checkpoint + 释放 lease）——这是 §7.3 多条缺口的根因
+3. shell hook 自动安装
+4. F15–F18（AGENTS.md 模板 / ship-scout / watcher / memory）
 
 ---
 
 ## 11. 一句话总结
 
-> **Gollum 让 Coding Agent 不再失忆：`npm install -g gollum` + `npx skills add kunchenguid/gollum`，切到哪个目录自动加载哪个项目的 Goal / Outcome / Task / Evidence，让长期项目推进像编辑文件一样自然。**
+> **Gollum 让 Coding Agent 不再失忆：切到哪个目录，自动加载那个项目的 Goal / Outcome / Task / Evidence。**
+>
+> V0.2 实际交付的是**分发层**：`gollum-flow` npm tarball（**尚未 publish**）+
+> postinstall 软链 + `gollum doctor` / `gollum install-skills` + 7 个带 frontmatter 的 Skills，
+> 状态层沿用 V0.1 的 SQLite。
+> `npx skills add` 与 §5.3 列出的 F15–F18 均未实现。
