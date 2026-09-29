@@ -4,6 +4,7 @@
  */
 
 import { Command } from 'commander';
+import { readFileSync } from 'node:fs';
 import { getStore, resetStore } from '../workflow/store/store.js';
 import {
   projectCreate,
@@ -669,10 +670,9 @@ program
   .description('Validate a planned structure from JSON file')
   .requiredOption('--plan <file>', 'Plan JSON file')
   .action((opts) => {
-    const fs = require('node:fs') as typeof import('node:fs');
     let plan: PlannedGoal;
     try {
-      plan = JSON.parse(fs.readFileSync(opts.plan, 'utf-8'));
+      plan = JSON.parse(readFileSync(opts.plan, 'utf-8'));
     } catch (e: any) {
       console.error(`✗ Cannot read plan file: ${e.message}`);
       process.exit(1);

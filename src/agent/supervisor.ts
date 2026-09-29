@@ -34,10 +34,10 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, createWriteStream } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { hostname } from 'node:os';
-import type { Store } from '../workflow/store/store.js';
+import { getStore as getStoreUncached, type Store } from '../workflow/store/store.js';
 import {
   supervisorHeartbeat,
   supervisorHealth,
@@ -192,11 +192,11 @@ export class ParentSupervisor {
 
     // Capture logs to file
     if (child.stdout) {
-      const out = require('node:fs').createWriteStream(this.opts.paths.workerLogFile, { flags: 'a' });
+      const out = createWriteStream(this.opts.paths.workerLogFile, { flags: 'a' });
       child.stdout.pipe(out);
     }
     if (child.stderr) {
-      const err = require('node:fs').createWriteStream(this.opts.paths.workerLogFile, { flags: 'a' });
+      const err = createWriteStream(this.opts.paths.workerLogFile, { flags: 'a' });
       child.stderr.pipe(err);
     }
 
@@ -214,7 +214,7 @@ export class ParentSupervisor {
   private async check(): Promise<void> {
     if (this.stopping) return;
 
-    const health = supervisorHealth(this.store ?? (require('../workflow/store/store.js').getStore() as Store));
+    const health = supervisorHealth(this.store ?? (getStoreUncached()));
 
     if (health.status === 'running' || health.status === 'stale') {
       // Worker is alive (or just barely alive). Reset backoff.
@@ -261,7 +261,7 @@ export class ParentSupervisor {
 
     // Record restart in DB
     try {
-      const store = this.store ?? (require('../workflow/store/store.js').getStore() as Store);
+      const store = this.store ?? (getStoreUncached());
       recordRestart(store, {
         reason: `heartbeat stale ${Math.round(health.stale_for_ms / 1000)}s`,
         new_pid: this.worker?.pid,

@@ -20,7 +20,7 @@
 
 import { Command } from 'commander';
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, appendFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { getStore, resetStore } from '../../workflow/store/store.js';
 import {
@@ -95,7 +95,7 @@ export function supervisorCommand(): Command {
           const ts = new Date().toISOString();
           console.log(`[parent ${ts}] ${msg}`);
           try {
-            require('node:fs').appendFileSync(paths.logFile, `[parent ${ts}] ${msg}\n`);
+            appendFileSync(paths.logFile, `[parent ${ts}] ${msg}\n`);
           } catch {}
         },
       });
