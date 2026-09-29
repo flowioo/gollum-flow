@@ -950,7 +950,7 @@ tail -f ~/.gollum/runtime/events/2026-09-28.yaml
 | npm 包 | `private: true`，不可发布 | `gollum-flow@0.2.0`，publishable（**尚未 publish**）|
 | bin 入口 | 仅 `gollum` | + `gollum-resolver` / `gollum-store` |
 | postinstall | 无 | `src/hooks/postinstall.ts`，建 `~/.gollum/` + 软链 skills |
-| 自检 | 无 | `gollum doctor`（6 项）|
+| 自检 | 无 | `gollum doctor`（6 个检查组：Node / `~/.gollum` 布局 / store / 宿主 / skills / 项目）|
 | 手动装 skills | 无 | `gollum install-skills`（幂等，`lstat` 区分 symlink）|
 | Skills 可被发现 | ❌ SKILL.md 无 frontmatter | ✅ 7 个带 `name` + `description` |
 | Project 解析 | 无 | `src/workflow/resolver.ts` + `gollum resolver` |

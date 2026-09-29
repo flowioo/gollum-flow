@@ -319,7 +319,8 @@ $ codex
 
 ### 7.1 V0.2 已验证
 
-- [x] `npm pack` 产出的 tarball 含 7 个 `SKILL.md`（E2E 步骤 2a）
+- [x] **fresh clone 上 `npm install` 退出 0**（E2E 步骤 1a；回归防护：postinstall 曾因 `dist/` 不存在而崩溃）
+- [x] `npm pack` 产出的 tarball 含 7 个 `SKILL.md`（步骤 2a）
 - [x] `postinstall` 在干净环境下 exit 0，无 ESM 错误，建出 `~/.gollum/` 结构（步骤 3a/3b）
 - [x] `gollum install-skills` 的 7 条软链 realpath 全部落在 tarball 安装目录内，**不指向开发树**（步骤 4a）
 - [x] `gollum doctor` 在隔离 HOME 下全绿（步骤 5）

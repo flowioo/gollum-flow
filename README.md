@@ -13,9 +13,12 @@ it got to, or what to do next.
 ## Install
 
 ```bash
-# from a local tarball (verified path)
-git clone <this repo> && cd gollum
-npm install && npm run build
+# from source (npm install runs `prepare`, which builds dist)
+git clone <this repo>
+cd gollum
+npm install
+
+# or install the packed tarball
 npm pack --pack-destination /tmp
 npm install -g /tmp/gollum-flow-0.2.0.tgz
 ```
@@ -33,7 +36,9 @@ gollum install-skills    # re-link skills (idempotent)
 gollum install-skills --agent claude-code
 ```
 
-`gollum doctor` should end with `all checks passed`.
+`gollum doctor` should end with `all checks passed`. It runs six check groups:
+Node version, `~/.gollum` layout, store connectivity, detected agents, skill
+links, and registered projects.
 
 ## Daily use
 
