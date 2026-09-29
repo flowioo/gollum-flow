@@ -44,30 +44,65 @@ links, and registered projects.
 
 ```bash
 cd ~/code/my-project
-gollum init               # create project + prompt for a goal
+gollum init               # creates the default project + runs migrations
 claude                    # or codex / mavis / cursor
 ```
 
-The host picks up the `gollum-bootstrap` skill, resolves the current project, and
-loads Goal / Outcome / Task into context.
+Then just talk to the host — no commands to memorise:
+
+```text
+用 gollum 记一下：把登录测试的偶发失败查清楚      → gollum-plan  skill 建 Goal/Outcome/Task
+继续 gollum 的活儿                              → gollum-task-resume / gollum-task-run
+这个 task 做完了，验证一下                       → gollum-verify skill 写 evidence
+看看这个 outcome 还差什么                       → gollum-outcome-evaluate
+这个 task 好像跑偏了                             → gollum-goal-align
+刚才失败了，帮我恢复                             → gollum-recover
+```
+
+Skills are read when the host starts, so **restart Claude Code / Codex after
+installing** before the first `gollum` request.
+
+Everything the skills do is plain `gollum` CLI, so you can always bypass the
+host and drive it yourself:
+
+```bash
+gollum goal create -p "$PROJECT_ID" -t "标题" -d "背景"   # → GOAL_ID
+gollum outcome create -g "$GOAL_ID" -t "结果"              # → OUTCOME_ID
+gollum criterion create -o "$OUTCOME_ID" -d "可验证的条件" \
+  --verifier-type command --verifier-config '{"command":"npm test"}'
+gollum task create -o "$OUTCOME_ID" -t "一个最小动作" \
+  --acceptance "验收条件" --estimated-minutes 25           # → TASK_ID
+
+gollum scheduler pick                    # 挑下一个该做的 task
+gollum task claim "$TASK_ID" -o me       # PENDING → RUNNING（带 lease）
+gollum task checkpoint "$TASK_ID" -s "进展摘要" -o "观察" --next-action "下一步"
+gollum task complete "$TASK_ID" -s "结果" # RUNNING → DONE
+gollum evidence create -c "$CRITERION_ID" --status PASS --executor me --data '{}'
+gollum goal list --tree                  # Goal → Outcome → Task 全树
+```
+
+Two rules the state machine enforces, so you cannot skip them: a `Task` must
+hang off an `Outcome` (`task create` requires `--outcome-id`), and a task cannot
+go `PENDING → DONE` directly — you must `claim` it first.
 
 ## Skills
 
-Seven skills ship inside the npm package at `dist/skills/core/`, each with YAML
+Eight skills ship inside the npm package at `dist/skills/core/`, each with YAML
 frontmatter so hosts can discover them:
 
-| Directory | `name:` |
-|---|---|
-| `bootstrap` | `gollum-bootstrap` |
-| `task-run` | `gollum-task-run` |
-| `task-resume` | `gollum-task-run-resume` |
-| `verify` | `gollum-verify` |
-| `recover` | `gollum-recover` |
-| `outcome-evaluate` | `gollum-outcome-evaluate` |
-| `goal-align` | `gollum-goal-align` |
+| Directory | `name:` | what it is for |
+|---|---|---|
+| `bootstrap` | `gollum-bootstrap` | host startup: resolve project, load state into context |
+| `plan` | `gollum-plan` | turn one sentence into Goal → Outcome → Task |
+| `task-run` | `gollum-task-run` | run a task start to finish |
+| `task-resume` | `gollum-task-run-resume` | pick up an interrupted task |
+| `verify` | `gollum-verify` | attach evidence, drive the outcome to VERIFIED |
+| `recover` | `gollum-recover` | recover a failed task |
+| `outcome-evaluate` | `gollum-outcome-evaluate` | report remaining gap on an outcome |
+| `goal-align` | `gollum-goal-align` | detect scope creep on a task |
 
-The directory name is short on purpose; the `name:` field carries the `gollum-`
-prefix to avoid collisions. `gollum install-skills` links by **directory name**.
+Every command and flag these skills name is checked against the real CLI by
+`tests/skills-contract.test.ts`, which also covers this README.
 
 `npx skills add <github-repo>` is **not** used — it requires a GitHub repo as the
 skill source, while these skills ship in the npm tarball.
@@ -89,10 +124,10 @@ State lives in SQLite (`~/.local/share/gollum/gollum.db`, WAL, version-based CAS
 (skills, tools, runtime, registry.yaml).
 
 ```bash
-gollum goal list
-gollum outcome list --active
-gollum task list
-gollum evidence list
+gollum goal list --tree
+gollum outcome list -g "$GOAL_ID"
+gollum task list -o "$OUTCOME_ID"
+gollum evidence list -c "$CRITERION_ID"
 gollum scheduler tick
 gollum goal-align <task_id>
 gollum recover <task_id>
@@ -102,16 +137,17 @@ gollum recover <task_id>
 
 ```bash
 npm run typecheck
-npm test                      # 77 unit tests
+npm test                      # 133 tests
 npm run build
 bash tests/_v02_install_e2e.sh            # install E2E (isolated HOME, includes Claude)
 GOLLUM_E2E_SKIP_CLAUDE=1 bash tests/_v02_install_e2e.sh   # skip the Claude step
 ```
 
 `tests/_v02_install_e2e.sh` packs a tarball, installs it into an isolated prefix
-with an isolated `HOME`, audits that all seven skill symlinks resolve inside the
-tarball install (not the dev tree), runs `gollum doctor`, and — unless skipped —
-has Claude Code read the installed `SKILL.md`.
+with an isolated `HOME`, asserts the three `bin` entries are executable and
+`.bin/gollum` runs as a command, audits that all eight skill symlinks resolve
+inside the tarball install (not the dev tree), runs `gollum doctor`, and —
+unless skipped — has Claude Code read the installed `SKILL.md`.
 
 ## Known gaps (v0.2)
 
@@ -122,6 +158,9 @@ has Claude Code read the installed `SKILL.md`.
 - bash watcher / scheduler wake events not implemented
 - `gollum memory.read/write` not implemented
 - Project switch protocol (checkpoint + lease release on directory change) not implemented
+- GitHub tools live in `src/core/github.ts` but have **no CLI entry point** since
+  MCP was removed; the six `mcp__gollum__github_*` tools are gone until they are
+  re-exposed as commands
 
 See `docs/PRD-v0.2.md` §5 for the shipped/not-implemented breakdown.
 

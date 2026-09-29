@@ -10,8 +10,6 @@
   },
   "files": [
     "dist",
-    "skills",
-    "templates",
     "README.md"
   ],
   "keywords": [
@@ -27,7 +25,7 @@
     "workflow"
   ],
   "scripts": {
-    "build": "tsc && mkdir -p dist/workflow/store/migrations && cp src/workflow/store/migrations/*.sql dist/workflow/store/migrations/ && rm -rf dist/skills && cp -r src/skills dist/skills && rm -rf dist/templates && cp -r src/templates dist/templates 2>/dev/null || true",
+    "build": "tsc && mkdir -p dist/workflow/store/migrations && cp src/workflow/store/migrations/*.sql dist/workflow/store/migrations/ && rm -rf dist/skills && cp -r src/skills dist/skills && node scripts/chmod-bins.mjs",
     "dev": "tsx src/cli/index.ts",
     "test": "tsx --test tests/*.test.ts",
     "test:watch": "tsx --test --watch tests/*.test.ts",

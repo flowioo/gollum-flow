@@ -5,6 +5,8 @@
 
 import { Command } from 'commander';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { getStore, resetStore } from '../workflow/store/store.js';
 import {
   projectCreate,
@@ -48,11 +50,24 @@ import { installCodex } from '../adapters/codex/installer.js';
 import { installClaude } from '../adapters/claude-code/installer.js';
 import type { Outcome, Task } from '../workflow/model/types.js';
 
+// Read the version from package.json instead of hardcoding it — a hardcoded
+// string shipped 0.1.0 well after the package moved to 0.2.0. Resolved relative
+// to this file so it works from dist/ (installed) and from src/ (tsx dev).
+function readVersion(): string {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const pkg = JSON.parse(readFileSync(join(here, '..', '..', 'package.json'), 'utf-8'));
+    return pkg.version ?? '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+
 const program = new Command();
 program
   .name('gollum')
   .description('Portable workflow, skills and tools for reliable long-running coding agents')
-  .version('0.1.0');
+  .version(readVersion());
 
 // =============================================================================
 // init

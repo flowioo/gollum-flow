@@ -8,11 +8,17 @@
 # 验证 5 件事：
 #   1. npm pack 产出的 tarball 包含 dist/skills/core/<skill>/SKILL.md
 #   2. postinstall hook 在**真实 HOME** 下创建 ~/.gollum/ 结构（不吞错误）
+#   2a. tarball 里的 3 个 bin 入口带 +x 和 shebang，`.bin/gollum` 能当命令直接跑
 #   3. 从 tarball 安装后，`gollum install-skills` 软链的**目标**是
 #      $INSTALL_PREFIX/node_modules/gollum-flow/dist/skills/core/<skill>
 #      （不是开发树）
 #   4. `gollum doctor` 报告 7/7 skills linked
 #   5. Claude Code 在隔离 HOME 下能读到 skill 并正确复述
+#
+# 为什么 2a 不能省：本脚本其他所有步骤都用 `node "$GOLLUM_BIN"` 调用 CLI，
+# 文件没有可执行位也能跑通，0644 的 dist 能让整个 E2E 全绿。
+# 注意 npm install <tarball> 自己会把 bin 补成 0755，所以这一步不验证
+# "registry 安装会不会坏"（不会坏），它验证的是 .bin shim 真的能当命令跑起来。
 #
 # 用法：
 #   bash tests/_v02_install_e2e.sh              # 完整跑（含 Claude）
@@ -95,7 +101,38 @@ GOLLUM_BIN="$INSTALL_PREFIX/node_modules/$PKG_NAME/dist/cli/index.js"
 echo "  ✓ installed: $GOLLUM_BIN"
 
 echo
-echo "=== [3a/6] Assert postinstall has no ESM require() bug ==="
+echo "=== [3a/6] Installed bin entries are executable and run as commands ==="
+# Every other step in this script invokes the CLI as `node "$GOLLUM_BIN"`,
+# which works even when the file has no +x bit. That is how a tarball shipped
+# with mode 0644 passed this whole E2E while `gollum` itself failed for every
+# user with "Permission denied". These checks execute the files directly.
+FAIL=0
+for name in gollum gollum-resolver gollum-store; do
+  f="$INSTALL_PREFIX/node_modules/$PKG_NAME/$(node -p "require('$INSTALL_PREFIX/node_modules/$PKG_NAME/package.json').bin['$name']" | sed 's|^\./||')"
+  if [ ! -x "$f" ]; then
+    echo "  ✗ $name is not executable: $(ls -l "$f" | cut -d' ' -f1) $f"
+    FAIL=1
+  fi
+  head -c 2 "$f" | grep -q '#!' || { echo "  ✗ $name has no shebang"; FAIL=1; }
+done
+[ "$FAIL" = 0 ] && echo "  ✓ all 3 bin entries are 0755 with a shebang"
+
+# Run it the way a user does: through the .bin shim npm creates, as a command.
+if [ -x "$INSTALL_PREFIX/node_modules/.bin/gollum" ]; then
+  if "$INSTALL_PREFIX/node_modules/.bin/gollum" --version >"$WORKDIR/binversion.log" 2>&1; then
+    echo "  ✓ .bin/gollum --version -> $(cat "$WORKDIR/binversion.log")"
+  else
+    echo "  ✗ .bin/gollum --version failed: $(cat "$WORKDIR/binversion.log")"
+    FAIL=1
+  fi
+else
+  echo "  ✗ npm did not create an executable .bin/gollum shim"
+  FAIL=1
+fi
+[ "$FAIL" = 0 ] || { echo "  ✗ installed bin entries are not runnable"; exit 1; }
+
+echo
+echo "=== [3b/6] Assert postinstall has no ESM require() bug ==="
 # The previous version of this hook called require() inside an ESM module and
 # crashed; a `|| echo` in package.json hid it. Run it for real, no fallback.
 #
@@ -121,7 +158,7 @@ echo "  ✓ postinstall ran clean (exit 0, no ESM require error)"
 sed 's/^/    /' "$WORKDIR/postinstall.log" | head -3
 
 echo
-echo "=== [3b/6] Assert postinstall provisioned the ISOLATED HOME ==="
+echo "=== [3c/6] Assert postinstall provisioned the ISOLATED HOME ==="
 for d in "" skills tools runtime runtime/leases runtime/events runtime/scheduler; do
   [ -d "$FAKE_HOME/.gollum/$d" ] || { echo "  ✗ missing $FAKE_HOME/.gollum/$d"; exit 1; }
 done

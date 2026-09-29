@@ -33,9 +33,20 @@ const built = existsSync(CLI);
 function gollumCommands(md: string): { cmd: string; flags: string[] }[] {
   const out: { cmd: string; flags: string[] }[] = [];
   const seen = new Set<string>();
+
+  // A heading that lists what is NOT implemented names commands on purpose.
+  let inGaps = false;
+
   for (const line of md.split('\n')) {
+    const h = /^#{1,6}\s+(.*)$/.exec(line);
+    if (h) {
+      inGaps = /known gaps|not implemented|roadmap|todo/i.test(h[1]!);
+      continue;
+    }
+    if (inGaps) continue;
+
     if (!/\bgollum\s+[a-z]/.test(line)) continue;
-    for (const m of line.matchAll(/\bgollum\s+((?:[a-z][a-z-]*\s*)+)/g)) {
+    for (const m of line.matchAll(/(?<![\w./-])gollum\s+((?:[a-z][a-z-]*\s*)+)/g)) {
       const words = m[1]!.trim().split(/\s+/);
       if (!words.length) continue;
       // A valid subcommand is 1-2 words; stop before positional values.
@@ -49,8 +60,11 @@ function gollumCommands(md: string): { cmd: string; flags: string[] }[] {
       if (cmdWords.length === 0) continue;
       const cmd = cmdWords.join(' ');
       if (cmd.includes('$')) continue;
-      // Flags = long flags anywhere in the rest of the line after `gollum <cmd>`.
+      // Skip shell variable assignments: `remaining=$(gollum outcome ...)`
+      // starts with `gollum` only because the command substitution follows it.
       const after = line.slice(line.indexOf('gollum ' + cmd) + ('gollum ' + cmd).length);
+      if (/^\s*=/.test(after)) continue;
+      // Flags = long flags anywhere in the rest of the line after `gollum <cmd>`.
       const flags = [...after.matchAll(/(--[a-z][a-z-]*)/g)].map((f) => f[1]!);
       const key = cmd + '|' + flags.join(' ');
       if (seen.has(key)) continue;
@@ -61,22 +75,52 @@ function gollumCommands(md: string): { cmd: string; flags: string[] }[] {
   return out;
 }
 
-/** Does the CLI accept `<cmd> --help`, and does it document every long flag? */
-function cliAccepts(cmd: string, flags: string[]): { ok: boolean; why: string } {
-  let help = '';
+/** Run the CLI and return combined output + exit code, never throwing. */
+function run(args: string[]): { out: string; code: number } {
   try {
-    help = execFileSync(process.execPath, [CLI, ...cmd.split(' '), '--help'], {
+    const out = execFileSync(process.execPath, [CLI, ...args], {
       stdio: ['ignore', 'pipe', 'pipe'],
       encoding: 'utf-8',
     });
+    return { out, code: 0 };
   } catch (e) {
-    const err = e as { stdout?: string; stderr?: string };
-    return { ok: false, why: `command not found: gollum ${cmd} :: ${(err.stderr ?? '').slice(0, 120)}` };
+    const err = e as { stdout?: string; stderr?: string; status?: number };
+    return {
+      out: `${err.stdout ?? ''}${err.stderr ?? ''}`,
+      code: typeof err.status === 'number' ? err.status : 1,
+    };
   }
+}
+
+// A flag that cannot collide with a real one. Probing the command path with it
+// distinguishes "this subcommand exists" from "this subcommand does not":
+//
+//   gollum goal list --zzz-sentinel    -> error: unknown option '--zzz-sentinel'   (exists)
+//   gollum task release --zzz-sentinel -> error: unknown command 'release'          (missing)
+//
+// Checking `<cmd> --help` instead is not enough: for an unknown subcommand
+// commander prints the *parent* help and exits 0, so `gollum task release
+// --help` looked identical to a valid command. That hole is how a SKILL.md can
+// document `gollum task release` and still pass this test.
+const SENTINEL = '--zzz-gollum-contract-sentinel';
+
+/** Does the CLI accept `<cmd>` as a real command path, and document every long flag? */
+function cliAccepts(cmd: string, flags: string[]): { ok: boolean; why: string } {
+  const pathProbe = run([...cmd.split(' '), SENTINEL]);
+  if (/unknown command/.test(pathProbe.out)) {
+    const named = /unknown command '([^']+)'/.exec(pathProbe.out)?.[1] ?? '?';
+    return { ok: false, why: `gollum ${cmd}: no such subcommand ('${named}')` };
+  }
+
+  const help = run([...cmd.split(' '), '--help']);
+  if (help.code !== 0) {
+    return { ok: false, why: `gollum ${cmd} --help failed: ${help.out.slice(0, 120)}` };
+  }
+
   for (const f of flags) {
     // Short flags are too ambiguous to check reliably in prose.
     if (!f.startsWith('--')) continue;
-    if (!help.includes(f)) return { ok: false, why: `gollum ${cmd} does not support ${f}` };
+    if (!help.out.includes(f)) return { ok: false, why: `gollum ${cmd} does not support ${f}` };
   }
   return { ok: true, why: '' };
 }
@@ -86,10 +130,6 @@ const skillDirs = existsSync(SKILLS_DIR)
       .filter((d) => d.isDirectory())
       .map((d) => d.name)
   : [];
-
-// Commands the CLI accepts but only when given a real argument, so --help
-// alone errors. They are validated separately in cli-smoke.test.ts.
-const NEEDS_ARG = new Set(['validate']);
 
 test('skills directory is non-empty', () => {
   assert.ok(skillDirs.length >= 7, `expected >=7 skills, found ${skillDirs.length}`);
@@ -121,7 +161,7 @@ for (const name of skillDirs) {
 
   test(`${name}: every gollum command and flag it names actually exists`, { skip: built ? false : 'dist/ not built' }, () => {
     const md = readFileSync(file, 'utf-8');
-    const cmds = gollumCommands(md).filter((c) => !NEEDS_ARG.has(c.cmd.split(' ')[0]!));
+    const cmds = gollumCommands(md);
     const bad: string[] = [];
     for (const { cmd, flags } of cmds) {
       const r = cliAccepts(cmd, flags);
@@ -138,4 +178,28 @@ test('at least one skill documents a runnable create path', () => {
   assert.match(plan, /gollum goal create/);
   assert.match(plan, /gollum task create/);
   assert.match(plan, /--outcome-id/);
+});
+
+// The README is the first thing a new user reads, and it drifted the same way
+// the skills did: it documented `gollum outcome list --active` and
+// `gollum task release` — neither of which exists. Hold it to the same contract.
+const README = join(ROOT, 'README.md');
+
+test('README: every gollum command and flag it names actually exists', { skip: built ? false : 'dist/ not built' }, () => {
+  const md = readFileSync(README, 'utf-8');
+  const bad = gollumCommands(md)
+    .map(({ cmd, flags }) => cliAccepts(cmd, flags))
+    .filter((r) => !r.ok)
+    .map((r) => r.why);
+  assert.deepEqual(bad, [], `\nREADME.md documents commands the CLI does not have:\n  ${bad.join('\n  ')}`);
+});
+
+test('README: lists every shipped skill', () => {
+  const md = readFileSync(README, 'utf-8');
+  for (const dir of skillDirs) {
+    const skill = readFileSync(join(SKILLS_DIR, dir, 'SKILL.md'), 'utf-8');
+    const name = /^name:\s*(\S+)/m.exec(skill.slice(4, skill.indexOf('\n---', 4)))?.[1];
+    assert.ok(name, `${dir}/SKILL.md has no name:`);
+    assert.ok(md.includes(name), `README.md does not mention the ${name} skill`);
+  }
 });
