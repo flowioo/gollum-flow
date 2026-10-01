@@ -31,21 +31,51 @@ npm install -g /tmp/gollum-flow-0.2.0.tgz
 ## Verify the install
 
 ```bash
-gollum doctor            # node version, ~/.gollum layout, store, agents, skills, projects
+gollum doctor            # node version, ~/.gollum layout, store, agents, skills, slash commands, projects
 gollum install-skills    # re-link skills (idempotent)
 gollum install-skills --agent claude-code
 ```
 
-`gollum doctor` should end with `all checks passed`. It runs six check groups:
+`gollum doctor` should end with `all checks passed`. It runs seven check groups:
 Node version, `~/.gollum` layout, store connectivity, detected agents, skill
-links, and registered projects.
+links, slash commands, and registered projects. A *partial* link set is an error,
+not a warning — a silently half-installed bundle is the failure mode this is
+built to catch.
 
 ## Daily use
 
 ```bash
 cd ~/code/my-project
-gollum init               # creates the default project + runs migrations
+gollum init               # create/reuse a Project + write .gollum/project.yaml
 claude                    # or codex / mavis / cursor
+```
+
+`gollum init` is what binds a directory to the state layer. It finds a Project
+with the same name and reuses it, or creates one, then writes
+`.gollum/project.yaml` in the current directory:
+
+```bash
+gollum init                          # project name = directory name
+gollum init -n my-project            # explicit name
+gollum init --cwd ~/code/other-repo  # bind a directory you are not standing in
+gollum init --force                  # rebind over an existing project.yaml
+```
+
+Re-running is safe: an already-bound directory reports `Already bound` and
+changes nothing. `gollum project` has **no delete command**, which is why `init`
+reuses an existing Project by name instead of creating a second one.
+
+> `.gollum/project.yaml` is named `.yaml` but is parsed with `JSON.parse` —
+> write it as JSON. Plain YAML fails silently: the resolver just returns
+> `project_id: null` with no error. Add `.gollum/` to `.gitignore`, since the
+> Project ID inside is a row ID in your local SQLite.
+
+Inside Claude Code, `/gollum:init` wraps the same flow (installed to
+`~/.claude/commands/gollum/init.md`):
+
+```text
+/gollum:init                    # bind the current directory
+/gollum:init my-project         # …under a specific project name
 ```
 
 Then just talk to the host — no commands to memorise:
@@ -181,7 +211,8 @@ gollum recover <task_id>
 
 ```bash
 npm run typecheck
-npm test                      # 164 tests
+npm run lint
+npm test                      # 171 tests
 npm run build
 bash tests/_v02_install_e2e.sh            # install E2E (isolated HOME, includes Claude)
 GOLLUM_E2E_SKIP_CLAUDE=1 bash tests/_v02_install_e2e.sh   # skip the Claude step
@@ -202,12 +233,21 @@ unless skipped — has Claude Code read the installed `SKILL.md`.
 - bash watcher / scheduler wake events not implemented
 - `gollum memory.read/write` not implemented
 - Project switch protocol (checkpoint + lease release on directory change) not implemented
-- GitHub tools live in `src/core/github.ts` but have **no CLI entry point** since
-  MCP was removed; the six `mcp__gollum__github_*` tools are gone until they are
-  re-exposed as commands
 
 See `docs/PRD-v0.2.md` §5 for the shipped/not-implemented breakdown.
 
+## Contributing
+
+`npm run lint && npm run typecheck && npm test` is the full local gate; CI runs
+the same three on Node 18/20/22 plus a `npm pack` assertion that the nine skills,
+the slash-command bundle and the three `bin` entries actually ship. A PR that
+says "verified" without pasting the real command output is not verified — the
+state layer's whole premise is *no evidence, not verified*.
+
+State-layer changes (a status transition, a migration, a CAS/lease rule) need
+evidence attached the same way `gollum verify` requires it: name the command,
+paste the result.
+
 ## License
 
-MIT
+[MIT](./LICENSE) © 2026 flowioo

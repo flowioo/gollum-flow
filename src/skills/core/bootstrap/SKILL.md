@@ -67,12 +67,19 @@ description: |
 If there is no Gollum state yet and the user wants to start tracking work here:
 
 ```bash
-gollum init          # 建默认 project + 跑 migration
-gollum project list   # 拿 project_id
+gollum init                 # 建/复用 Project + 写 .gollum/project.yaml
+gollum resolver notify-cwd "$PWD"   # 验证绑定
 ```
 
-`gollum init` takes no arguments — it creates the default project. Then use
-`gollum-plan` to turn what the user said into Goal / Outcome / Task.
+`gollum init` takes no required arguments — the Project name defaults to the
+directory name. It is **idempotent**: already-bound directories report
+`Already bound` and write nothing, and an existing Project with the same name is
+reused rather than duplicated (there is no `project delete`).
+
+Verify before doing anything else. If `notify-cwd` does not return
+`project_id` + `source: "project-yaml"`, the directory is still unbound — report
+that and stop rather than writing to the store. Then use `gollum-plan` to turn
+what the user said into Goal / Outcome / Task.
 
 ## Outputs
 

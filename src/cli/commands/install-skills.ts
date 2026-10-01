@@ -9,7 +9,7 @@
  * Targets: ~/.claude/skills/, ~/.codex/skills/, ~/.cursor/skills/, ~/.mavis/skills/
  */
 
-import { existsSync, mkdirSync, readdirSync, lstatSync, statSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, lstatSync, statSync, symlinkSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -19,9 +19,11 @@ const __dirname = dirname(__filename);
 // After build: dist/cli/commands/install-skills.js → skills live at dist/skills/
 const INSTALL_ROOT = join(__dirname, '..', '..');
 
-interface AgentDir { name: string; skillsDir: string; detectPath: string }
+interface AgentDir { name: string; skillsDir: string; detectPath: string; commandsDir?: string }
 const AGENTS: AgentDir[] = [
-  { name: 'claude-code', skillsDir: join(homedir() ?? '', '.claude', 'skills'), detectPath: join(homedir() ?? '', '.claude') },
+  // Only Claude Code has the `commands/<ns>/<name>.md` → `/<ns>:<name>`
+  // slash-command convention, so it is the only agent that gets commandsDir.
+  { name: 'claude-code', skillsDir: join(homedir() ?? '', '.claude', 'skills'), detectPath: join(homedir() ?? '', '.claude'), commandsDir: join(homedir() ?? '', '.claude', 'commands') },
   { name: 'codex', skillsDir: join(homedir() ?? '', '.codex', 'skills'), detectPath: join(homedir() ?? '', '.codex') },
   { name: 'cursor', skillsDir: join(homedir() ?? '', '.cursor', 'skills'), detectPath: join(homedir() ?? '', '.cursor') },
   { name: 'mavis', skillsDir: join(homedir() ?? '', '.mavis', 'skills'), detectPath: join(homedir() ?? '', '.mavis') },
@@ -44,6 +46,73 @@ function findSkills(root: string): SkillEntry[] {
     }
   }
   return out;
+}
+
+/**
+ * Slash commands: every .md under <base>, keeping the path relative to *base*
+ * so a `commands/gollum/init.md` lands at `~/.claude/commands/gollum/init.md`
+ * and is invoked as `/gollum:init`. The prefix has to be carried down through
+ * the recursion — resolving against the current dir flattens the namespace and
+ * silently turns it into a generic `/init`.
+ */
+interface CommandEntry { relPath: string; srcFile: string }
+
+function findCommands(base: string, dir: string = base, prefix: string = ''): CommandEntry[] {
+  const out: CommandEntry[] = [];
+  if (!existsSync(dir)) return out;
+  for (const ent of readdirSync(dir, { withFileTypes: true })) {
+    const rel = prefix ? `${prefix}/${ent.name}` : ent.name;
+    const p = join(dir, ent.name);
+    if (ent.isDirectory()) out.push(...findCommands(base, p, rel));
+    else if (ent.isFile() && ent.name.endsWith('.md')) out.push({ relPath: rel, srcFile: p });
+  }
+  return out;
+}
+
+/**
+ * Link one path, reporting what happened. Shared by skills and commands:
+ * an existing symlink is left alone, a broken one is relinked, and a real
+ * file/dir the user owns is never touched.
+ */
+function linkInto(dst: string, src: string, kind: 'dir' | 'file'): 'linked' | 'exists' | 'relinked' | 'skipped' | 'failed' {
+  let repaired = false;
+  if (existsSync(dst) || isDanglingSymlink(dst)) {
+    if (isDanglingSymlink(dst)) {
+      // A symlink whose target vanished (stale dist/) is never a success.
+      // Remove it and fall through to a fresh link.
+      try {
+        unlinkSync(dst);
+        repaired = true;
+      } catch { /* fall through — the link call below reports the real error */ }
+    } else {
+      return 'exists';
+    }
+  }
+  try {
+    mkdirSync(dirname(dst), { recursive: true });
+    symlinkSync(src, dst, kind);
+    return repaired ? 'relinked' : 'linked';
+  } catch {
+    // Lost a race, or the destination is a real file/dir the user owns.
+    if (existsSync(dst)) return 'skipped';
+    return 'failed';
+  }
+}
+
+function isDanglingSymlink(p: string): boolean {
+  let lst;
+  try {
+    lst = lstatSync(p);
+  } catch {
+    return false;   // nothing there at all — not a broken link
+  }
+  if (!lst.isSymbolicLink()) return false;
+  try {
+    statSync(p);    // follows the link; throws when the target is gone
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 export async function installSkills(opts: { global: boolean; agent?: string }): Promise<{
@@ -77,44 +146,41 @@ export async function installSkills(opts: { global: boolean; agent?: string }): 
   }
 
   let linked = 0;
+  let linkedCommands = 0;
   for (const agent of targets) {
     mkdirSync(agent.skillsDir, { recursive: true });
     const skills = findSkills(skillsSrc);
     for (const skill of skills) {
       const dst = join(agent.skillsDir, skill.name);
-      if (existsSync(dst)) {
-        try {
-          const target = lstatSync(dst);
-          if (target.isSymbolicLink()) {
-            // Verify the symlink target still exists
-            try {
-              statSync(dst);
-              steps.push(`exists ~.${agent.name}/skills/${skill.name}`);
-            } catch {
-              steps.push(`broken ~.${agent.name}/skills/${skill.name} — relinking`);
-              // fall through to relink below by removing
-              // (skip symlinkSync; let it create fresh)
-            }
-            continue;
-          }
-        } catch { /* not a symlink, fall through */ }
-        // Real dir exists; skip (don't overwrite user's local skill)
-        steps.push(`exists ~.${agent.name}/skills/${skill.name} (not a symlink — leaving alone)`);
-        continue;
-      }
-      try {
-        symlinkSync(skill.srcDir, dst, 'dir');
-        steps.push(`linked ~.${agent.name}/skills/${skill.name} → ${skill.srcDir}`);
-        linked++;
-      } catch (e) {
-        steps.push(`FAILED ${dst}: ${(e as Error).message}`);
+      const rel = `~.${agent.name}/skills/${skill.name}`;
+      const r = linkInto(dst, skill.srcDir, 'dir');
+      if (r === 'linked') { steps.push(`linked ${rel} → ${skill.srcDir}`); linked++; }
+      else if (r === 'relinked') { steps.push(`relinked ${rel} → ${skill.srcDir}`); linked++; }
+      else if (r === 'exists') steps.push(`exists ${rel}`);
+      else if (r === 'skipped') steps.push(`exists ${rel} (not a symlink — leaving alone)`);
+      else steps.push(`FAILED ${dst}`);
+    }
+
+    // Slash commands (Claude Code only)
+    if (agent.commandsDir) {
+      for (const cmd of findCommands(join(INSTALL_ROOT, 'commands'))) {
+        const dst = join(agent.commandsDir, cmd.relPath);
+        const slash = '/' + cmd.relPath.replace(/\.md$/, '').split(/[\\/]/).join(':');
+        const rel = `~.${agent.name}/commands/${cmd.relPath}`;
+        const r = linkInto(dst, cmd.srcFile, 'file');
+        if (r === 'linked' || r === 'relinked') {
+          steps.push(`${r === 'linked' ? 'linked' : 'relinked'} ${rel} → ${slash}`);
+          linkedCommands++;
+        } else if (r === 'exists') steps.push(`exists ${rel} → ${slash}`);
+        else if (r === 'skipped') steps.push(`exists ${rel} (not a symlink — leaving alone)`);
+        else steps.push(`FAILED ${dst}`);
       }
     }
   }
 
   return {
     ok: true,
-    message: `linked ${linked} skill(s) into ${targets.length} agent(s)`,
+    message: `linked ${linked} skill(s) and ${linkedCommands} command(s) into ${targets.length} agent(s)`,
     steps,
   };
 }

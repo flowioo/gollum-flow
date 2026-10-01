@@ -10,10 +10,10 @@
  *   6. Project registry (count + recent)
  */
 
-import { existsSync, readdirSync, readlinkSync, statSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { homedir, platform } from 'node:os';
+import { homedir } from 'node:os';
 import { getStore } from '../../workflow/store/store.js';
 import { listProjects } from '../../workflow/resolver.js';
 
@@ -29,7 +29,21 @@ const warn = (s: string) => console.log(`${c.yellow}!${c.reset} ${s}`);
 const err = (s: string) => console.log(`${c.red}✗${c.reset} ${s}`);
 const info = (s: string) => console.log(`${c.cyan}ℹ${c.reset} ${s}`);
 
-interface CheckResult { ok: boolean; warnings: string[]; errors: string[] }
+/** Relative paths of every .md under root (e.g. `gollum/init.md`). */
+function findCommandFiles(root: string, prefix = ''): string[] {
+  const out: string[] = [];
+  for (const ent of readdirSync(root, { withFileTypes: true })) {
+    const rel = prefix ? `${prefix}/${ent.name}` : ent.name;
+    if (ent.isDirectory()) out.push(...findCommandFiles(join(root, ent.name), rel));
+    else if (ent.isFile() && ent.name.endsWith('.md')) out.push(rel);
+  }
+  return out.sort();
+}
+
+/** existsSync follows symlinks, so a link into a wiped dist/ reads as missing. */
+function isResolvable(p: string): boolean {
+  return existsSync(p);
+}
 
 export async function runDoctor(): Promise<{ ok: boolean; report: string[] }> {
   const report: string[] = [];
@@ -124,6 +138,34 @@ export async function runDoctor(): Promise<{ ok: boolean; report: string[] }> {
     totalSkills = Math.max(totalSkills, found);
   }
   if (totalSkills === 0) warnings.push('no skills linked');
+
+  // 5b. Slash commands (Claude Code only — no other agent has the convention).
+  // Same "partial is not ok" rule as skills: a silently absent /gollum:init is
+  // exactly how a broken install stays invisible.
+  const commandsSrc = join(__dirname, '..', '..', 'commands');
+  const gollumCommands = existsSync(commandsSrc) ? findCommandFiles(commandsSrc) : [];
+  for (const agent of detected.filter((a) => a.name === 'claude-code')) {
+    const commandsDir = join(agent.dir, 'commands');
+    if (gollumCommands.length === 0) {
+      warn('no bundled slash commands found (dist/commands is empty — run `npm run build`)');
+      break;
+    }
+    if (!existsSync(commandsDir)) {
+      warn(`no slash commands linked in ${agent.name} (run: gollum install-skills)`);
+      warnings.push(`${agent.name} commands`);
+      continue;
+    }
+    const missing = gollumCommands.filter((rel) => !isResolvable(join(commandsDir, rel)));
+    const found = gollumCommands.length - missing.length;
+    if (missing.length === 0) {
+      ok(`commands linked in ${agent.name}: ${found}/${gollumCommands.length} (${gollumCommands.map((c) => '/' + c.replace(/\.md$/, '').split('/').join(':')).join(', ')})`);
+    } else if (found === 0) {
+      warn(`no Gollum slash commands found in ${agent.name} (run: gollum install-skills)`);
+    } else {
+      err(`commands incomplete in ${agent.name}: ${found}/${gollumCommands.length}, missing ${missing.join(', ')}`);
+      errors.push(`${agent.name} commands`);
+    }
+  }
 
   // 6. Projects
   try {

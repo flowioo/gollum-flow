@@ -35,7 +35,7 @@
     "workflow"
   ],
   "scripts": {
-    "build": "tsc && mkdir -p dist/workflow/store/migrations && cp src/workflow/store/migrations/*.sql dist/workflow/store/migrations/ && rm -rf dist/skills && cp -r src/skills dist/skills && node scripts/chmod-bins.mjs",
+    "build": "tsc && mkdir -p dist/workflow/store/migrations && cp src/workflow/store/migrations/*.sql dist/workflow/store/migrations/ && rm -rf dist/skills dist/commands && cp -r src/skills dist/skills && cp -r src/commands dist/commands && node scripts/chmod-bins.mjs",
     "dev": "tsx src/cli/index.ts",
     "test": "tsx --test tests/*.test.ts",
     "test:watch": "tsx --test --watch tests/*.test.ts",
