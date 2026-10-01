@@ -13,7 +13,7 @@
  * - Reads can be raw queries
  */
 
-import { DatabaseSync, type StatementSync } from 'node:sqlite';
+import { DatabaseSync } from 'node:sqlite';
 import { ulid } from 'ulid';
 import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';

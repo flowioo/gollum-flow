@@ -4,6 +4,10 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { execSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { projectCreate, goalCreate } from '../src/core/goal.js';
 import { outcomeCreate } from '../src/core/outcome.js';
 import { criterionCreate, criterionList } from '../src/core/criterion.js';
@@ -63,17 +67,65 @@ describe('verify.command', () => {
 });
 
 describe('verify.git', () => {
+  // These must not assert on the repo gollum happens to be running inside: a
+  // tarball extraction, a CI cache or any non-git cwd has no .git, and the
+  // ambient working tree says nothing about the code under test. Build a real
+  // repo in a temp dir and point `repo` at it instead.
+  function makeTempRepo(): { dir: string; cleanup: () => void } {
+    const dir = mkdtempSync(join(tmpdir(), 'gollum-verify-git-'));
+    const git = (args: string) => execSync(`git ${args}`, { cwd: dir, encoding: 'utf-8' });
+    git('init -q');
+    git('config user.email fixture@example.com');
+    git('config user.name fixture');
+    writeFileSync(join(dir, 'a.txt'), 'one\n');
+    git('add a.txt');
+    git('commit -q -m init');
+    return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  }
+
   it('returns PASS when working tree is clean', async () => {
-    // /tmp is typically not a git repo; use current dir if it is, else skip
-    // For robustness, just call it without expect.clean
-    const result = await verifyGit({ type: 'status' });
-    assert.ok(result.status === 'PASS' || result.status === 'FAIL');
+    const { dir, cleanup } = makeTempRepo();
+    try {
+      const result = await verifyGit({ type: 'status', repo: dir, expect: { clean: true } });
+      assert.equal(result.ok, true);
+      assert.equal(result.status, 'PASS');
+    } finally {
+      cleanup();
+    }
   });
 
   it('reports diff summary', async () => {
-    const result = await verifyGit({ type: 'diff' });
-    assert.equal(result.ok, true);
-    assert.equal(result.status, 'PASS');
+    const { dir, cleanup } = makeTempRepo();
+    try {
+      writeFileSync(join(dir, 'a.txt'), 'one\ntwo\n');
+      const result = await verifyGit({ type: 'diff', repo: dir });
+      assert.equal(result.ok, true);
+      assert.equal(result.status, 'PASS');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('fails when a clean tree is required but files changed', async () => {
+    const { dir, cleanup } = makeTempRepo();
+    try {
+      writeFileSync(join(dir, 'a.txt'), 'dirty\n');
+      const result = await verifyGit({ type: 'status', repo: dir, expect: { clean: true } });
+      assert.equal(result.ok, false);
+      assert.equal(result.status, 'FAIL');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('reports not-a-repo instead of throwing', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gollum-verify-nogit-'));
+    try {
+      const result = await verifyGit({ type: 'diff', repo: dir });
+      assert.equal(result.ok, false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

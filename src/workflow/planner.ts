@@ -81,7 +81,7 @@ export function validatePlan(plan: PlannedGoal): PlannerResult {
   }
 
   // Outcome-level
-  for (const [i, outcome] of plan.outcomes.entries()) {
+  for (const outcome of plan.outcomes) {
     if (outcome.criteria.length > SOFT_MAX_CRITERIA_PER_OUTCOME) {
       warnings.push({
         level: 'warning',

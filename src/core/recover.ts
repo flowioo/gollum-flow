@@ -21,9 +21,6 @@ import { type Store } from '../workflow/store/store.js';
 import {
   type Task,
   type ToolResult,
-  type VerifyStatus,
-  type Criterion,
-  type VerifierSpec,
 } from '../workflow/model/types.js';
 
 // =============================================================================
@@ -59,7 +56,7 @@ export type StrategyHint =
 /**
  * Classify a verify/tool failure into a FailureType.
  */
-export function classifyFailure(result: ToolResult, failureContext?: Record<string, unknown>): FailureType {
+export function classifyFailure(result: ToolResult, _failureContext?: Record<string, unknown>): FailureType {
   if (!result.error) return 'VERIFY_FAILED';
   const type = result.error.type;
   if (type === 'TIMEOUT' || type === 'EVIDENCE_INSUFFICIENT') return 'TIMEOUT';

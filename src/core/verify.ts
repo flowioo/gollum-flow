@@ -326,7 +326,7 @@ export async function verifyByCriterion(
   criterion_id: string,
   executor: string = 'system',
 ): Promise<ToolResult> {
-  const { criterion, latest_evidence } = criterionGet(store, criterion_id);
+  const { criterion } = criterionGet(store, criterion_id);
   if (!criterion.verifier) {
     return fail(
       `criterion ${criterion_id} has no verifier`,

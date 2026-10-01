@@ -15,7 +15,7 @@
  * silently split the database from the one the CLI reads.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, lstatSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, symlinkSync, lstatSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -115,6 +115,6 @@ export function installClaude(): { ok: boolean; message: string; steps: string[]
 }
 
 // Kept for API compatibility; reads the current .mcp.json if present.
-export function installClaudeMcpServer(paths: ClaudePaths): { ok: boolean; message: string; steps: string[] } {
+export function installClaudeMcpServer(_paths: ClaudePaths): { ok: boolean; message: string; steps: string[] } {
   return { ok: true, message: 'MCP registration removed', steps: ['skipped: MCP is not used'] };
 }

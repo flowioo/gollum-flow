@@ -45,7 +45,7 @@ import { quotaCommand } from './commands/quota.js';
 import { heartbeatCommand } from './commands/heartbeat.js';
 import { verifyByCriterion, verifyCommand, verifyGit } from '../core/verify.js';
 import { applyRecovery } from '../core/recover.js';
-import { goalAlign, handleMisaligned, handleUncertain } from '../core/goal-align.js';
+import { goalAlign, handleMisaligned } from '../core/goal-align.js';
 import {
   githubSearchIssues,
   githubGetIssue,

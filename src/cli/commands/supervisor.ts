@@ -21,14 +21,12 @@
 import { Command } from 'commander';
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, appendFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
 import { getStore, resetStore } from '../../workflow/store/store.js';
 import {
   defaultSupervisorPaths,
   readSupervisorStatus,
   stopSupervisor,
   ParentSupervisor,
-  type SupervisorPaths,
 } from '../../agent/supervisor.js';
 import { AgentLoop } from '../../agent/loop.js';
 
@@ -96,7 +94,7 @@ export function supervisorCommand(): Command {
           console.log(`[parent ${ts}] ${msg}`);
           try {
             appendFileSync(paths.logFile, `[parent ${ts}] ${msg}\n`);
-          } catch {}
+          } catch { /* log write is best-effort */ }
         },
       });
       await supervisor.start();

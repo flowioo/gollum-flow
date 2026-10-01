@@ -107,7 +107,7 @@ export function installCodexSkills(paths: CodexPaths): InstallResult {
 // Verification
 // =============================================================================
 
-export function verifyCodexInstall(paths: CodexPaths): InstallResult {
+export function verifyCodexInstall(_paths: CodexPaths): InstallResult {
   const steps: string[] = [];
   const src = bundledSkillsDir();
   if (!existsSync(src)) {
@@ -144,6 +144,6 @@ export function installCodex(): InstallResult {
 }
 
 // Kept for API compatibility; no longer writes a config.toml block.
-export function installCodexMcpServer(paths: CodexPaths): InstallResult {
+export function installCodexMcpServer(_paths: CodexPaths): InstallResult {
   return { ok: true, message: 'MCP registration removed', steps: ['skipped: MCP is not used'] };
 }

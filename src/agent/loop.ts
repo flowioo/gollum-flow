@@ -39,7 +39,6 @@ import {
 import {
   canDispatch,
   getQuotaState,
-  tickQuotaRecovery,
 } from './quota.js';
 
 // =============================================================================
@@ -160,7 +159,6 @@ export class AgentLoop {
 
     // Main loop
     while (!this.shouldStop()) {
-      const cycleStart = Date.now();
       this.runId++;
       const runId = this.runId;
 

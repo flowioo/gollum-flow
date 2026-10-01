@@ -39,12 +39,8 @@ import { dirname, join, resolve } from 'node:path';
 import { hostname } from 'node:os';
 import { getStore as getStoreUncached, type Store } from '../workflow/store/store.js';
 import {
-  supervisorHeartbeat,
   supervisorHealth,
   recordRestart,
-  supervisorStart,
-  SUPERVISOR_STALE_MS,
-  HEARTBEAT_STALE_MS,
 } from './heartbeat.js';
 
 // =============================================================================
@@ -246,12 +242,12 @@ export class ParentSupervisor {
 
     // Kill any lingering process
     if (this.worker?.pid) {
-      try { process.kill(this.worker.pid, 'SIGTERM'); } catch {}
-      try { process.kill(this.worker.pid, 'SIGKILL'); } catch {}
+      try { process.kill(this.worker.pid, 'SIGTERM'); } catch { /* already exited */ }
+      try { process.kill(this.worker.pid, 'SIGKILL'); } catch { /* already exited */ }
     }
     const oldPid = readPidFile(this.opts.paths.workerPidFile);
     if (oldPid && oldPid > 0 && isPidAlive(oldPid)) {
-      try { process.kill(oldPid, 'SIGKILL'); } catch {}
+      try { process.kill(oldPid, 'SIGKILL'); } catch { /* already exited */ }
     }
 
     await sleep(wait);
@@ -275,9 +271,9 @@ export class ParentSupervisor {
     this.stopping = true;
     if (this.checkTimer) clearInterval(this.checkTimer);
     if (this.worker?.pid) {
-      try { process.kill(this.worker.pid, 'SIGTERM'); } catch {}
+      try { process.kill(this.worker.pid, 'SIGTERM'); } catch { /* already exited */ }
       await sleep(2000);
-      try { process.kill(this.worker.pid, 'SIGKILL'); } catch {}
+      try { process.kill(this.worker.pid, 'SIGKILL'); } catch { /* already exited */ }
     }
     clearPidFile(this.opts.paths.parentPidFile);
     clearPidFile(this.opts.paths.workerPidFile);
@@ -331,10 +327,10 @@ export function stopSupervisor(paths: SupervisorPaths): { stopped: boolean; pare
   const workerPid = readPidFile(paths.workerPidFile);
 
   if (workerPid && isPidAlive(workerPid)) {
-    try { process.kill(workerPid, 'SIGTERM'); stoppedAnything = true; } catch {}
+    try { process.kill(workerPid, 'SIGTERM'); stoppedAnything = true; } catch { /* already exited */ }
   }
   if (parentPid && isPidAlive(parentPid)) {
-    try { process.kill(parentPid, 'SIGTERM'); stoppedAnything = true; } catch {}
+    try { process.kill(parentPid, 'SIGTERM'); stoppedAnything = true; } catch { /* already exited */ }
   }
 
   // Clear pid files after a delay (let processes exit cleanly first)
