@@ -16,7 +16,7 @@
 
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
@@ -31,21 +31,19 @@ let env: NodeJS.ProcessEnv;
 
 const built = existsSync(CLI);
 
-function gollum(args: string[]): { out: string; code: number } {
-  try {
-    const out = execFileSync(process.execPath, [CLI, ...args], {
-      env,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    return { out, code: 0 };
-  } catch (e) {
-    const err = e as { stdout?: string; stderr?: string; status?: number };
-    return {
-      out: `${err.stdout ?? ''}${err.stderr ?? ''}`,
-      code: typeof err.status === 'number' ? err.status : 1,
-    };
-  }
+function gollum(args: string[], cwd?: string): { out: string; code: number } {
+  // spawnSync (not execFileSync) so the scoping notice on stderr is visible on
+  // the success path too — that notice is how a user knows which project was used.
+  const r = spawnSync(process.execPath, [CLI, ...args], {
+    env,
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    ...(cwd ? { cwd } : {}),
+  });
+  return {
+    out: `${r.stdout ?? ''}${r.stderr ?? ''}`,
+    code: r.status === null ? 1 : r.status,
+  };
 }
 
 before(() => {
@@ -185,6 +183,36 @@ it('init is idempotent and reuses the same project (no delete exists)', () => {
 
   const after = JSON.parse(readFileSync(join(target, '.gollum', 'project.yaml'), 'utf-8'));
   assert.equal(after.project_id, first.project_id, 're-init changed the bound project');
+});
+
+it('goal list scopes to the project bound to cwd, --all escapes it', () => {
+  // Two projects share one DB. Without scoping, `goal list --tree` in one
+  // directory prints the other directory's task trees too.
+  const dirA = join(dbDir, 'scope-a');
+  const dirB = join(dbDir, 'scope-b');
+  mkdirSync(dirA, { recursive: true });
+  mkdirSync(dirB, { recursive: true });
+
+  gollum(['init', '--cwd', dirA, '-n', 'scope-a']);
+  gollum(['init', '--cwd', dirB, '-n', 'scope-b']);
+
+  const idA = JSON.parse(readFileSync(join(dirA, '.gollum', 'project.yaml'), 'utf-8')).project_id;
+  const idB = JSON.parse(readFileSync(join(dirB, '.gollum', 'project.yaml'), 'utf-8')).project_id;
+  assert.notEqual(idA, idB);
+
+  gollum(['goal', 'create', '-p', idA, '-t', 'goal in A']);
+  gollum(['goal', 'create', '-p', idB, '-t', 'goal in B']);
+
+  const scoped = gollum(['goal', 'list'], dirA);
+  assert.equal(scoped.code, 0, scoped.out);
+  assert.match(scoped.out, /goal in A/, scoped.out);
+  assert.doesNotMatch(scoped.out, /goal in B/, 'goal list leaked another project goal');
+  assert.match(scoped.out, /scoped to project/, 'must say which project it scoped to');
+
+  const all = gollum(['goal', 'list', '--all'], dirA);
+  assert.equal(all.code, 0, all.out);
+  assert.match(all.out, /goal in A/, all.out);
+  assert.match(all.out, /goal in B/, '--all must still show every project');
 });
 
 it('store health returns JSON', () => {

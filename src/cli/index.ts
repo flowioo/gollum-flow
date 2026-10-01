@@ -181,11 +181,26 @@ goal
 goal
   .command('list')
   .description('List goals (pass --tree for goal → outcome → task + criterion gap)')
-  .option('-p, --project-id <id>', 'Filter by project')
+  .option('-p, --project-id <id>', 'Filter by project (default: the project bound to cwd)')
+  .option('--all', 'List goals across every project, ignoring the cwd binding')
   .option('--tree', 'Show goal → outcome → task + criterion gap')
-  .action((opts) => {
+  .action(async (opts) => {
     const store = getStore();
-    const list = goalList(store, { project_id: opts.projectId });
+    // One DB serves every project, so an unfiltered list mixes unrelated repos'
+    // task trees. Prefer the project bound to cwd; `--all` is the escape hatch.
+    let projectId: string | undefined = opts.projectId;
+    if (!projectId && !opts.all) {
+      const { resolveProject } = await import('../workflow/resolver.js');
+      projectId = (await resolveProject(process.cwd())).project_id ?? undefined;
+    }
+    const list = goalList(store, { project_id: projectId });
+    if (!opts.projectId && !opts.all) {
+      console.error(
+        projectId
+          ? `(scoped to project ${projectId} — pass --all to list every project)`
+          : `(no project bound to cwd — pass --all to list every project)`,
+      );
+    }
     if (!opts.tree) {
       console.table(list.map((g) => ({ id: g.id, title: g.title, status: g.status })));
       return;
