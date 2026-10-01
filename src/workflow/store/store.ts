@@ -335,7 +335,7 @@ function resolveDefaultMigrationDir(): string {
   return candidates[0]!; // throw with the most informative path
 }
 
-function resolveDefaultDbPath(): string {
+export function resolveDefaultDbPath(): string {
   if (process.env.GOLLUM_DB_PATH) return process.env.GOLLUM_DB_PATH;
   // Default: XDG_DATA_HOME-aware global location. Same DB from any cwd after install.
   const xdg = process.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share');

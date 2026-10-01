@@ -4,14 +4,14 @@
  */
 
 import { Command } from 'commander';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-import { getStore, resetStore } from '../workflow/store/store.js';
+import { basename, dirname, join, resolve as resolvePath } from 'node:path';
+import { getStore, resetStore, resolveDefaultDbPath } from '../workflow/store/store.js';
 import {
   projectCreate,
   projectList,
-  projectGetOrCreateDefault,
+  projectFindByName,
   goalCreate,
   goalList,
   goalGet,
@@ -82,13 +82,57 @@ program
 // =============================================================================
 program
   .command('init')
-  .description('Initialize gollum workspace (creates default project + runs migrations)')
-  .action(() => {
+  .description('Initialize gollum in a directory: create/reuse a Project and write .gollum/project.yaml')
+  .option('-n, --name <name>', 'Project name (default: the directory name)')
+  .option('-d, --description <desc>', 'Project description')
+  .option('--cwd <dir>', 'Target directory (default: current directory)')
+  .option('--force', 'Overwrite an existing .gollum/project.yaml', false)
+  .action(async (opts) => {
     const store = getStore();
-    const project = projectGetOrCreateDefault(store);
+    const targetDir = resolvePath(opts.cwd ?? process.cwd());
+    const gollumDir = join(targetDir, '.gollum');
+    const yamlPath = join(gollumDir, 'project.yaml');
+
+    // Idempotency: an existing binding is reused as-is. `gollum project` has no
+    // delete, so a second `init` must not create a second project row.
+    if (existsSync(yamlPath) && !opts.force) {
+      const existing = readFileSync(yamlPath, 'utf-8');
+      let projectId = '(unreadable)';
+      try {
+        projectId = (JSON.parse(existing) as { project_id?: string }).project_id ?? '(missing project_id)';
+      } catch {
+        console.error(`✗ ${yamlPath} is not valid JSON — the resolver cannot read it.`);
+        console.error('  Fix the file by hand, or re-run with --force to overwrite it.');
+        process.exitCode = 1;
+        return;
+      }
+      console.log(`✓ Already bound — ${yamlPath}`);
+      console.log(`  Project ID: ${projectId}`);
+      console.log('  Nothing changed. Re-run with --force to rebind to a different project.');
+      return;
+    }
+
+    const name = opts.name ?? basename(targetDir);
+    const existingProject = projectFindByName(store, name);
+    const project = existingProject
+      ?? projectCreate(store, { name, description: opts.description ?? `gollum workspace at ${targetDir}` });
+
+    // The file is named .yaml but the resolver parses it with JSON.parse
+    // (src/workflow/resolver.ts) — plain YAML fails silently, so write JSON.
+    mkdirSync(gollumDir, { recursive: true });
+    writeFileSync(
+      yamlPath,
+      JSON.stringify({ project_id: project.id, name: project.name }, null, 2) + '\n',
+      'utf-8',
+    );
+
     console.log(`✓ Gollum initialized`);
-    console.log(`  Project: ${project.name} (${project.id})`);
-    console.log(`  DB: ${process.env.GOLLUM_DB_PATH ?? './data/gollum.db'}`);
+    console.log(`  Project: ${project.name} (${project.id})${existingProject ? '  [reused]' : ''}`);
+    console.log(`  Bound:   ${yamlPath}`);
+    console.log(`  DB:      ${resolveDefaultDbPath()}`);
+    if (existsSync(join(targetDir, '.git'))) {
+      console.log(`  Note:    ${join(targetDir, '.gollum', 'project.yaml')} holds a machine-local Project ID — add .gollum/ to .gitignore.`);
+    }
   });
 
 // =============================================================================

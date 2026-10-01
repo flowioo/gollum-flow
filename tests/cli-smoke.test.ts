@@ -17,7 +17,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -51,7 +51,9 @@ function gollum(args: string[]): { out: string; code: number } {
 before(() => {
   dbDir = mkdtempSync(join(tmpdir(), 'gollum-cli-smoke-'));
   env = { ...process.env, GOLLUM_DB_PATH: join(dbDir, 'smoke.db') };
-  if (built) gollum(['init']);
+  // --cwd is not optional here: `init` writes .gollum/project.yaml into its
+  // target, and without it the test would bind the gollum repo to itself.
+  if (built) gollum(['init', '--cwd', dbDir, '-n', 'cli-smoke']);
 });
 
 after(() => {
@@ -141,6 +143,48 @@ it('resolver notify-cwd returns JSON, not a crash', () => {
   assert.equal(code, 0, out);
   assert.doesNotMatch(out, /require is not defined/);
   JSON.parse(out);
+});
+
+it('init writes .gollum/project.yaml as JSON, and the resolver reads it back', () => {
+  const target = join(dbDir, 'bound-project');
+  mkdirSync(target, { recursive: true });
+
+  const a = gollum(['init', '--cwd', target, '-n', 'bound-project']);
+  assert.equal(a.code, 0, a.out);
+  assert.match(a.out, /Bound:/, a.out);
+
+  const yamlPath = join(target, '.gollum', 'project.yaml');
+  assert.ok(existsSync(yamlPath), 'init did not write .gollum/project.yaml');
+
+  // The file is named .yaml but the resolver JSON.parses it — plain YAML
+  // fails silently and returns project_id: null, so assert the exact shape.
+  const parsed = JSON.parse(readFileSync(yamlPath, 'utf-8'));
+  assert.match(parsed.project_id, /^[0-9A-Z]{26}$/, `bad project_id: ${parsed.project_id}`);
+  assert.equal(parsed.name, 'bound-project');
+
+  const r = gollum(['resolver', 'notify-cwd', target]);
+  const resolved = JSON.parse(r.out);
+  assert.equal(resolved.project_id, parsed.project_id, r.out);
+  assert.equal(resolved.source, 'project-yaml', r.out);
+});
+
+it('init is idempotent and reuses the same project (no delete exists)', () => {
+  const target = join(dbDir, 'idempotent-project');
+  mkdirSync(target, { recursive: true });
+
+  gollum(['init', '--cwd', target, '-n', 'idempotent-project']);
+  const first = JSON.parse(readFileSync(join(target, '.gollum', 'project.yaml'), 'utf-8'));
+
+  const second = gollum(['init', '--cwd', target, '-n', 'idempotent-project']);
+  assert.equal(second.code, 0, second.out);
+  assert.match(second.out, /Already bound/, second.out);
+
+  const third = gollum(['init', '--cwd', target, '-n', 'idempotent-project', '--force']);
+  assert.equal(third.code, 0, third.out);
+  assert.match(third.out, /\[reused\]/, 'force re-init must reuse the project, not create a second one');
+
+  const after = JSON.parse(readFileSync(join(target, '.gollum', 'project.yaml'), 'utf-8'));
+  assert.equal(after.project_id, first.project_id, 're-init changed the bound project');
 });
 
 it('store health returns JSON', () => {

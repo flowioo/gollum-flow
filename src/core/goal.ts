@@ -213,3 +213,15 @@ export function projectGetOrCreateDefault(store: Store): import('../workflow/mod
   if (existing.length > 0) return existing[0]!;
   return projectCreate(store, { name: 'default', description: 'Default singleton project' });
 }
+
+/**
+ * Look a project up by its exact name. `projects.name` is UNIQUE and there is
+ * no `project delete`, so re-running an init must reuse the existing row rather
+ * than throw on the insert or leave a trail of dead projects behind.
+ */
+export function projectFindByName(
+  store: Store,
+  name: string,
+): import('../workflow/model/types.js').Project | null {
+  return projectList(store).find((p) => p.name === name) ?? null;
+}
