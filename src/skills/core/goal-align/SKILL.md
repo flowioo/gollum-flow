@@ -51,13 +51,16 @@ gollum goal-align "$TASK_ID"
 
 ```text
 aligned     → 继续干活
-uncertain   → 说明理由给用户；或拆小 task；或先做 scout 调查
+uncertain   → gollum handle-uncertain "$TASK_ID"     # 落一条 replan 信号，task 继续跑
 misaligned  → gollum handle-misaligned "$TASK_ID"   # pause + rollback + 换 task
 ```
 
 ```bash
 # misaligned 的处理：不会升级找人，自己处理
 gollum handle-misaligned "$TASK_ID"
+
+# uncertain 的处理：task 不暂停，只落一条 replan 信号（PRD §15 同理不找人）
+gollum handle-uncertain "$TASK_ID"
 ```
 
 ## 什么时候必须问人

@@ -142,8 +142,3 @@ export function installCodex(): InstallResult {
     steps,
   };
 }
-
-// Kept for API compatibility; no longer writes a config.toml block.
-export function installCodexMcpServer(_paths: CodexPaths): InstallResult {
-  return { ok: true, message: 'MCP registration removed', steps: ['skipped: MCP is not used'] };
-}

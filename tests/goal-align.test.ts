@@ -6,6 +6,7 @@
  * - evidenceBasedCheck: remaining_gap analysis
  * - goalAlign: combined verdict (objective + llm)
  * - handleMisaligned: pause + rollback, no Human escalation
+ * - handleUncertain: emit a replan signal, task keeps running
  */
 
 import { describe, it } from 'node:test';
@@ -18,6 +19,7 @@ import { taskCreate, taskClaim } from '../src/core/task.js';
 import {
   goalAlign,
   handleMisaligned,
+  handleUncertain,
   llmSemanticCheck,
   evidenceBasedCheck,
 } from '../src/core/goal-align.js';
@@ -218,6 +220,38 @@ describe('Goal Alignment / handleMisaligned (PRD §15)', () => {
       assert.ok(events.length >= 1);
       const blocked = store.list<{ event: string }>('events', "event = 'TASK_BLOCKED'");
       assert.equal(blocked.length, 0); // NOT blocked → no Human escalation
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe('Goal Alignment / handleUncertain (uncertain → replan)', () => {
+  it('emits a replan signal and leaves the task runnable', () => {
+    const { store, cleanup } = makeTestStore();
+    try {
+      const p = projectCreate(store, { name: 'p1' });
+      const g = goalCreate(store, { project_id: p.id, title: 'g1' });
+      const o = outcomeCreate(store, { goal_id: g.id, title: 'o1' });
+      const t0 = taskCreate(store, { outcome_id: o.id, title: '调研缓存方案' });
+      const t = taskClaim(store, { task_id: t0.id, owner: 'agent' });
+
+      const result = handleUncertain(store, t);
+
+      // uncertain is NOT misaligned: the task keeps running so the agent can
+      // replan instead of being paused into the backlog.
+      assert.equal(result.task.status, 'RUNNING');
+      assert.match(result.reason, /uncertain/);
+      assert.match(result.reason, /replan/);
+
+      const events = store.list<{ event: string; payload: string | null }>(
+        'events',
+        "event = 'TASK_REJECTED_MISALIGNED'",
+      );
+      assert.ok(events.length >= 1);
+      // the payload column is stored as raw JSON text, not a parsed object
+      const payload = JSON.parse(events[events.length - 1].payload!) as { reason: string };
+      assert.equal(payload.reason, 'uncertain, replan');
     } finally {
       cleanup();
     }

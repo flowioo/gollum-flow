@@ -37,10 +37,6 @@ export function assertTaskTransition(from: TaskStatus, to: TaskStatus): void {
   }
 }
 
-export function isTaskTerminal(status: TaskStatus): boolean {
-  return status === 'DONE' || status === 'FAILED';
-}
-
 // =============================================================================
 // Outcome state machine
 // =============================================================================
@@ -65,10 +61,6 @@ export function assertOutcomeTransition(from: OutcomeStatus, to: OutcomeStatus):
   if (!canTransitionOutcome(from, to)) {
     throw new IllegalTransitionError(`Outcome: ${from} → ${to}`);
   }
-}
-
-export function isOutcomeTerminal(status: OutcomeStatus): boolean {
-  return status === 'VERIFIED' || status === 'FAILED';
 }
 
 // =============================================================================

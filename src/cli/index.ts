@@ -45,7 +45,7 @@ import { quotaCommand } from './commands/quota.js';
 import { heartbeatCommand } from './commands/heartbeat.js';
 import { verifyByCriterion, verifyCommand, verifyGit } from '../core/verify.js';
 import { applyRecovery } from '../core/recover.js';
-import { goalAlign, handleMisaligned } from '../core/goal-align.js';
+import { goalAlign, handleMisaligned, handleUncertain } from '../core/goal-align.js';
 import {
   githubSearchIssues,
   githubGetIssue,
@@ -741,6 +741,16 @@ program
     const store = getStore();
     const { task } = taskGet(store, id);
     const result = handleMisaligned(store, task, opts.reason);
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+program
+  .command('handle-uncertain <task_id>')
+  .description('Apply uncertain handler (emit a replan signal; the task keeps running)')
+  .action((id) => {
+    const store = getStore();
+    const { task } = taskGet(store, id);
+    const result = handleUncertain(store, task);
     console.log(JSON.stringify(result, null, 2));
   });
 

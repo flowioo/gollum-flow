@@ -104,56 +104,6 @@ export function goalCreate(store: Store, input: GoalCreateInput): Goal {
 }
 
 // =============================================================================
-// 4. goal.update (CAS)
-// =============================================================================
-
-export type GoalPatch = Partial<Pick<Goal, 'title' | 'description' | 'status'>>;
-
-export function goalUpdate(
-  store: Store,
-  goal_id: string,
-  expected_version: number,
-  patch: GoalPatch,
-): Goal {
-  const goal = store.get<Goal>('goals', goal_id);
-  const updated = store.casUpdate<Goal>('goals', goal_id, expected_version, patch);
-  store.emit({
-    event: 'GOAL_UPDATED',
-    goal_id,
-    payload: { patch, old_version: goal.version },
-  });
-  return updated;
-}
-
-// =============================================================================
-// 5. goal.achieve (all Outcomes VERIFIED → mark achieved)
-// =============================================================================
-
-export function goalAchieve(store: Store, goal_id: string): Goal {
-  const goal = store.get<Goal>('goals', goal_id);
-  const outcomes = store.list<import('../workflow/model/types.js').Outcome>(
-    'outcomes',
-    'goal_id = ?',
-    [goal_id],
-  );
-  const allVerified = outcomes.length > 0 && outcomes.every((o) => o.status === 'VERIFIED');
-  if (!allVerified) {
-    throw new Error(
-      `Cannot achieve goal ${goal_id}: ${outcomes.filter((o) => o.status !== 'VERIFIED').length} outcomes not VERIFIED`,
-    );
-  }
-  if (goal.status === 'achieved') return goal;
-
-  const updated = store.casUpdate<Goal>('goals', goal_id, goal.version, { status: 'achieved' });
-  store.emit({
-    event: 'GOAL_ACHIEVED',
-    goal_id,
-    payload: { outcomes_count: outcomes.length },
-  });
-  return updated;
-}
-
-// =============================================================================
 // Helpers
 // =============================================================================
 
@@ -197,10 +147,6 @@ export function projectCreate(store: Store, input: ProjectCreateInput): import('
     payload: { name: project.name, id: project.id },
   });
   return project;
-}
-
-export function projectGet(store: Store, id: string): import('../workflow/model/types.js').Project {
-  return store.get('projects', id);
 }
 
 export function projectList(store: Store): import('../workflow/model/types.js').Project[] {

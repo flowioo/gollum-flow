@@ -113,8 +113,3 @@ export function installClaude(): { ok: boolean; message: string; steps: string[]
     steps,
   };
 }
-
-// Kept for API compatibility; reads the current .mcp.json if present.
-export function installClaudeMcpServer(_paths: ClaudePaths): { ok: boolean; message: string; steps: string[] } {
-  return { ok: true, message: 'MCP registration removed', steps: ['skipped: MCP is not used'] };
-}
