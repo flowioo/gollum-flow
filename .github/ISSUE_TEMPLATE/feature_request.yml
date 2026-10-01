@@ -1,0 +1,43 @@
+name: Feature request
+
+description: Suggest a capability or a change to an existing one
+
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: |
+        What can't you do today? Describe the situation, not the solution.
+        ("I lose the reason I was working after a restart" beats "add a why.md")
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like instead
+    validations:
+      required: true
+
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Which layer does this touch?
+      options:
+        - State layer (Goal / Outcome / Task / Evidence / Checkpoint)
+        - CLI surface (gollum <command>)
+        - Skills (a bundled SKILL.md)
+        - Store / migrations (SQLite schema)
+        - Install / packaging
+        - Not sure
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: prior-art
+    attributes:
+      label: Prior art
+      options:
+        - label: I searched existing issues for this
+        - label: This overlaps something in docs/PRD-v0.2.md §5 (Known gaps)

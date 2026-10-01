@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The package claims node >=18 in engines; verify the floor still holds.
+        node: ['18', '20', '22']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install (runs `prepare` → build)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+  pack:
+    # A fresh `npm pack` must contain the three bin entries, the nine skills and
+    # the slash-command bundle — the release ships dist/, not src/.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Pack
+        run: npm pack --pack-destination /tmp
+
+      - name: Assert tarball contents
+        run: |
+          set -euo pipefail
+          TGZ=$(ls /tmp/gollum-flow-*.tgz)
+          echo "tarball: $TGZ"
+          CONTENTS=$(tar -tzf "$TGZ")
+
+          for entry in \
+            package/dist/cli/index.js \
+            package/dist/cli/gollum-resolver.js \
+            package/dist/cli/gollum-store.js \
+            package/dist/hooks/postinstall.js \
+            package/LICENSE \
+            package/README.md
+          do
+            echo "$CONTENTS" | grep -qx "$entry" || { echo "MISSING: $entry"; exit 1; }
+          done
+
+          # every bundled skill must ship a SKILL.md
+          for skill in bootstrap fix-issue goal-align outcome-evaluate plan \
+                       recover task-resume task-run verify; do
+            echo "$CONTENTS" | grep -qx "package/dist/skills/core/$skill/SKILL.md" \
+              || { echo "MISSING skill: $skill"; exit 1; }
+          done
+
+          echo "$CONTENTS" | grep -qx "package/dist/commands/gollum/init.md" \
+            || { echo "MISSING slash command: gollum/init.md"; exit 1; }
+
+          echo "tarball contents OK"
+
+      - name: Install the tarball and run the CLI
+        run: |
+          set -euo pipefail
+          TGZ=$(ls /tmp/gollum-flow-*.tgz)
+          npm install -g "$TGZ"
+          gollum --version

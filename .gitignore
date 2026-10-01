@@ -50,6 +50,8 @@ tmp/
 # Scratch (debug-only files, NOT test fixtures)
 repro.ts
 vitest.config.ts
+_test_*.ts
+tests/_probe*.sh
 
 # Old test backups
 *.test.ts.bak
@@ -58,11 +60,17 @@ vitest.config.ts
 __pycache__/
 *.pyc
 
-# Build output
-dist/
-*.tsbuildinfo
-
 # Agent host integration (user-level, not project-level)
 .codex/skills/gollum-*/
 .claude/skills/gollum-*/
-.mcp.json*.db*
+.claude/settings.local.json
+
+# Project-level MCP config: usually local absolute paths / credentials
+.mcp.json
+
+# Third-party spec-workflow scaffolding (tool-local, not part of this project)
+.spec-workflow/
+
+# E2E run artifacts: patches exported from OTHER repos by the fix-issue E2E.
+# These are output, not source — regenerating them is the tests' job.
+docs/w6-pr/

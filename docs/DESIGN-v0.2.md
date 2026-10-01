@@ -134,9 +134,9 @@ version: 1
 projects:
   - id: proj_gollum_pi
     name: gollum-pi
-    repo_root: /Users/qinchunxia/code/gollum-pi
-    state_dir: /Users/qinchunxia/.gollum/proj_gollum_pi
-    identity_file: /Users/qinchunxia/code/gollum-pi/.steward/project.yaml
+    repo_root: /Users/you/code/my-project
+    state_dir: /Users/you/.gollum/proj_my_project
+    identity_file: /Users/you/code/my-project/.gollum/project.yaml
     last_opened: 2026-09-28T23:30:00+08:00
     last_host: claude-code
     status: active

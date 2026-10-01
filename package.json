@@ -3,6 +3,16 @@
   "version": "0.2.0",
   "description": "Agent distro for long-running coding agents — Goal / Outcome / Task / Evidence / Checkpoint state layer with portable skills and tools.",
   "type": "module",
+  "license": "MIT",
+  "author": "flowioo",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/flowioo/gollum-flow.git"
+  },
+  "homepage": "https://github.com/flowioo/gollum-flow#readme",
+  "bugs": {
+    "url": "https://github.com/flowioo/gollum-flow/issues"
+  },
   "bin": {
     "gollum": "./dist/cli/index.js",
     "gollum-resolver": "./dist/cli/gollum-resolver.js",

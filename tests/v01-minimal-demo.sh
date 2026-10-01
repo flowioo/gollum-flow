@@ -10,7 +10,7 @@
 #   5. Verify          6. Recovery
 
 set -e
-cd /Users/qinchunxia/lab/gollum
+cd "$(dirname "$0")/.."
 
 DB=/tmp/gollum-v01-demo.db
 DEMO_REPO=tests/fixtures/demo-repo

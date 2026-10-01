@@ -1,0 +1,65 @@
+name: Bug report
+
+description: Something in gollum does not behave as documented
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing. `gollum doctor` output is the single most useful
+        thing to paste here — it covers Node version, `~/.gollum` layout, store
+        connectivity, detected agents and linked skills.
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: `gollum doctor` output
+      description: Paste the full output of `gollum doctor`.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you run, and what did you expect instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: The smallest command sequence that shows the problem.
+      render: shell
+
+  - type: input
+    id: version
+    attributes:
+      label: gollum version
+      description: Output of `gollum --version`
+      placeholder: 0.2.0
+    validations:
+      required: true
+
+  - type: input
+    id: host
+    attributes:
+      label: Agent host
+      description: Which host reproduced this (Claude Code, Codex, Cursor, Mavis, plain CLI)?
+      placeholder: claude-code
+
+  - type: input
+    id: node
+    attributes:
+      label: Node version
+      placeholder: v22.14.0
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: macOS 15.3

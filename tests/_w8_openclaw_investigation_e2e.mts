@@ -179,7 +179,8 @@ async function main() {
   // T3: code read
   console.log('\n--- T3: local code read ---');
   taskClaim(store, { task_id: t3.id, owner: 'mavis/w8', lease_ms: 60_000 });
-  const LOCAL_REPO = '/Users/qinchunxia/Documents/git-workspace/openclaw';
+  // Point at your local openclaw checkout. Override with OPENCLAW_REPO.
+  const LOCAL_REPO = process.env.OPENCLAW_REPO ?? resolve(process.cwd(), '..', 'openclaw');
   const modelTs = resolve(LOCAL_REPO, 'src/agents/pi-embedded-runner/model.ts');
   const attemptTs = resolve(LOCAL_REPO, 'src/agents/pi-embedded-runner/run/attempt.ts');
   log(`model.ts exists: ${existsSync(modelTs)}`);
@@ -241,7 +242,7 @@ async function main() {
 #   - Reviewing the 4 previously-closed issues (#83035/#61958/#62691/#105110)
 #
 # Not applied because:
-#   - Patch is in /Users/qinchunxia/Documents/git-workspace/openclaw (outside gollum project)
+#   - Patch lives in your openclaw checkout (outside the gollum project)
 #   - openclaw's clawsweeper bot auto-rejects external PRs (clawsweeper-recovery-stuck label)
 #   - Risk of regression > value of stderr improvement without reproduction
 `;
