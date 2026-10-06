@@ -31,7 +31,7 @@ let env: NodeJS.ProcessEnv;
 
 const built = existsSync(CLI);
 
-function gollum(args: string[], cwd?: string): { out: string; code: number } {
+function gollum(args: string[], cwd?: string): { out: string; stdout: string; stderr: string; code: number } {
   // spawnSync (not execFileSync) so the scoping notice on stderr is visible on
   // the success path too — that notice is how a user knows which project was used.
   const r = spawnSync(process.execPath, [CLI, ...args], {
@@ -40,8 +40,14 @@ function gollum(args: string[], cwd?: string): { out: string; code: number } {
     stdio: ['ignore', 'pipe', 'pipe'],
     ...(cwd ? { cwd } : {}),
   });
+  const stdout = r.stdout ?? '';
+  const stderr = r.stderr ?? '';
   return {
-    out: `${r.stdout ?? ''}${r.stderr ?? ''}`,
+    out: `${stdout}${stderr}`,
+    // stdout/stderr stay separate: Node 22.13 still prints an ExperimentalWarning
+    // for node:sqlite, so `out` is not always valid JSON even when stdout is.
+    stdout,
+    stderr,
     code: r.status === null ? 1 : r.status,
   };
 }
@@ -141,10 +147,10 @@ it('validate --plan rejects a >30min task as a hard error', () => {
 });
 
 it('resolver notify-cwd returns JSON, not a crash', () => {
-  const { out, code } = gollum(['resolver', 'notify-cwd', ROOT]);
+  const { out, stdout, code } = gollum(['resolver', 'notify-cwd', ROOT]);
   assert.equal(code, 0, out);
   assert.doesNotMatch(out, /require is not defined/);
-  JSON.parse(out);
+  JSON.parse(stdout);
 });
 
 it('init writes .gollum/project.yaml as JSON, and the resolver reads it back', () => {
@@ -165,7 +171,7 @@ it('init writes .gollum/project.yaml as JSON, and the resolver reads it back', (
   assert.equal(parsed.name, 'bound-project');
 
   const r = gollum(['resolver', 'notify-cwd', target]);
-  const resolved = JSON.parse(r.out);
+  const resolved = JSON.parse(r.stdout);
   assert.equal(resolved.project_id, parsed.project_id, r.out);
   assert.equal(resolved.source, 'project-yaml', r.out);
 });
@@ -220,10 +226,10 @@ it('goal list scopes to the project bound to cwd, --all escapes it', () => {
 });
 
 it('store health returns JSON', () => {
-  const { out, code } = gollum(['store', 'health']);
+  const { out, stdout, code } = gollum(['store', 'health']);
   assert.equal(code, 0, out);
   assert.doesNotMatch(out, /require is not defined/);
-  JSON.parse(out);
+  JSON.parse(stdout);
 });
 
 it('events list runs', () => {
