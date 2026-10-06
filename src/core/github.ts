@@ -34,7 +34,7 @@ export function resolveGhToken(): string {
     return cachedToken;
   }
   try {
-    const out = execSync('gh auth token', { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const out = execSync('gh auth token', { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
     cachedToken = out.trim();
   } catch {
     cachedToken = '';
@@ -108,7 +108,7 @@ export async function githubSearchIssues(args: SearchIssuesArgs): Promise<Search
   const url = `${GH_API}/search/issues?q=${encodeURIComponent(q)}&sort=${args.sort ?? 'updated'}&order=${args.order ?? 'desc'}&per_page=${Math.min(args.per_page ?? 20, 100)}&page=${args.page ?? 1}`;
 
   try {
-    const resp = await fetch(url, { headers: ghHeaders() });
+    const resp = await fetch(url, { signal: AbortSignal.timeout(15000), headers: ghHeaders() });
     const rl = resp.headers.get('x-ratelimit-remaining');
     if (!resp.ok) {
       const text = await resp.text();
@@ -147,7 +147,7 @@ export interface GetIssueArgs {
 export async function githubGetIssue(args: GetIssueArgs): Promise<{ ok: boolean; issue?: GitHubIssue & { body: string }; error?: string }> {
   const url = `${GH_API}/repos/${args.owner}/${args.repo}/issues/${args.issue_number}`;
   try {
-    const resp = await fetch(url, { headers: ghHeaders() });
+    const resp = await fetch(url, { signal: AbortSignal.timeout(15000), headers: ghHeaders() });
     if (!resp.ok) {
       return { ok: false, error: `HTTP ${resp.status}: ${await resp.text()}` };
     }
@@ -198,7 +198,7 @@ export interface GitHubPr {
 export async function githubGetPr(args: GetPrArgs): Promise<{ ok: boolean; pr?: GitHubPr; error?: string }> {
   const url = `${GH_API}/repos/${args.owner}/${args.repo}/pulls/${args.pr_number}`;
   try {
-    const resp = await fetch(url, { headers: ghHeaders() });
+    const resp = await fetch(url, { signal: AbortSignal.timeout(15000), headers: ghHeaders() });
     if (!resp.ok) {
       return { ok: false, error: `HTTP ${resp.status}: ${await resp.text()}` };
     }

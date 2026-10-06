@@ -1,7 +1,7 @@
 {
   "name": "gollum-flow",
   "version": "0.2.0",
-  "description": "Agent distro for long-running coding agents — Goal / Outcome / Task / Evidence / Checkpoint state layer with portable skills and tools.",
+  "description": "Agent distro for long-running coding agents \u2014 Goal / Outcome / Task / Evidence / Checkpoint state layer with portable skills and tools.",
   "type": "module",
   "license": "MIT",
   "author": "flowioo",
@@ -20,7 +20,9 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "docs/AUTONOMY.md",
+    "docs/SELF-IMPROVEMENT.md"
   ],
   "keywords": [
     "agent-distro",
@@ -37,8 +39,8 @@
   "scripts": {
     "build": "tsc && mkdir -p dist/workflow/store/migrations && cp src/workflow/store/migrations/*.sql dist/workflow/store/migrations/ && rm -rf dist/skills dist/commands && cp -r src/skills dist/skills && cp -r src/commands dist/commands && node scripts/chmod-bins.mjs",
     "dev": "tsx src/cli/index.ts",
-    "test": "tsx --test tests/*.test.ts",
-    "test:watch": "tsx --test --watch tests/*.test.ts",
+    "test": "npm run build && node --import tsx --test tests/*.test.ts",
+    "test:watch": "node --import tsx --test --watch tests/*.test.ts",
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",
     "prepare": "npm run build",
@@ -58,7 +60,7 @@
     "typescript": "^5.4.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.13.0"
   },
   "publishConfig": {
     "access": "public"

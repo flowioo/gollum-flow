@@ -8,10 +8,11 @@
  * 5. outcome.mark_verified
  */
 
+import { evidenceIsCurrent } from './evidence-scope.js';
 import { ulid } from 'ulid';
 import { NotFoundError, type Store } from '../workflow/store/store.js';
 import { guardOutcomeTransition } from '../workflow/model/state.js';
-import type { Outcome, OutcomeStatus, RemainingGap } from '../workflow/model/types.js';
+import type { Outcome, RemainingGap } from '../workflow/model/types.js';
 
 // =============================================================================
 // 1. outcome.list_active
@@ -75,7 +76,11 @@ export function outcomeRemainingGap(store: Store, outcome_id: string): Remaining
   };
 
   for (const c of criteria) {
-    switch (c.derived_status) {
+    const evidence = c.latest_evidence_id ? store.tryGet<{ data: string | null }>('evidences', c.latest_evidence_id) : null;
+    const data = evidence?.data ? JSON.parse(evidence.data) : null;
+    const verifier = typeof c.verifier === 'string' ? JSON.parse(c.verifier) : c.verifier;
+    const effective = c.derived_status === 'PASS' && !evidenceIsCurrent(data, verifier) ? 'UNKNOWN' : c.derived_status;
+    switch (effective) {
       case 'PASS':
         gap.pass++;
         break;
@@ -95,39 +100,6 @@ export function outcomeRemainingGap(store: Store, outcome_id: string): Remaining
 }
 
 // =============================================================================
-// 4. outcome.update (CAS)
-// =============================================================================
-
-export type OutcomePatch = {
-  title?: string;
-  status?: OutcomeStatus;
-  priority?: number;
-  criteria_ids?: unknown; // accepts string[] | JSON-string; serialized internally
-};
-
-export function outcomeUpdate(
-  store: Store,
-  outcome_id: string,
-  expected_version: number,
-  patch: OutcomePatch,
-): Outcome {
-  const outcome = store.get<Outcome>('outcomes', outcome_id);
-  if (patch.status) {
-    guardOutcomeTransition(outcome.status, patch.status);
-  }
-  const updated = store.casUpdate<Outcome>('outcomes', outcome_id, expected_version, patch as Partial<Outcome>);
-
-  store.emit({
-    event: 'OUTCOME_UPDATED',
-    outcome_id,
-    goal_id: outcome.goal_id,
-    payload: { patch, old_status: outcome.status, new_status: updated.status },
-  });
-
-  return parseOutcome(updated);
-}
-
-// =============================================================================
 // 5. outcome.mark_verified (校验所有 criteria PASS 后置 VERIFIED)
 // =============================================================================
 
@@ -139,50 +111,53 @@ export function outcomeUpdate(
  * (i.e., caller hasn't created any Tasks but already verified via direct evidence).
  */
 export function outcomeMarkVerified(store: Store, outcome_id: string): Outcome {
-  const outcome = store.get<Outcome>('outcomes', outcome_id);
-  const gap = outcomeRemainingGap(store, outcome_id);
+  return store.transaction(() => {
+    const outcome = store.get<Outcome>('outcomes', outcome_id);
+    const gap = outcomeRemainingGap(store, outcome_id);
 
-  if (gap.unverified > 0) {
-    throw new Error(
-      `Cannot mark Outcome ${outcome_id} VERIFIED: ${gap.unverified} criteria UNVERIFIED (missing verifier)`,
-    );
-  }
-  if (gap.fail > 0 || gap.unknown > 0) {
-    throw new Error(
-      `Cannot mark Outcome ${outcome_id} VERIFIED: remaining gap = ${gap.remaining}`,
-    );
-  }
+    if (gap.total === 0) throw new Error('Cannot verify an Outcome without criteria');
+    if (gap.unverified > 0) {
+      throw new Error(
+        `Cannot mark Outcome ${outcome_id} VERIFIED: ${gap.unverified} criteria UNVERIFIED (missing verifier)`,
+      );
+    }
+    if (gap.fail > 0 || gap.unknown > 0) {
+      throw new Error(
+        `Cannot mark Outcome ${outcome_id} VERIFIED: remaining gap = ${gap.remaining}`,
+      );
+    }
 
-  let current = outcome;
-  // Auto-cascade NOT_STARTED → IN_PROGRESS if needed
-  if (current.status === 'NOT_STARTED') {
-    current = store.casUpdate<Outcome>('outcomes', outcome_id, current.version, {
-      status: 'IN_PROGRESS',
+    let current = outcome;
+    // Auto-cascade NOT_STARTED → IN_PROGRESS if needed
+    if (current.status === 'NOT_STARTED') {
+      current = store.casUpdate<Outcome>('outcomes', outcome_id, current.version, {
+        status: 'IN_PROGRESS',
+      });
+      store.emit({
+        event: 'OUTCOME_IN_PROGRESS',
+        outcome_id,
+        payload: { reason: 'auto before mark_verified' },
+      });
+    }
+
+    guardOutcomeTransition(current.status, 'VERIFIED');
+
+    const updated = store.casUpdate<Outcome>('outcomes', outcome_id, current.version, {
+      status: 'VERIFIED',
     });
+
     store.emit({
-      event: 'OUTCOME_IN_PROGRESS',
+      event: 'OUTCOME_VERIFIED',
       outcome_id,
-      payload: { reason: 'auto before mark_verified' },
+      goal_id: outcome.goal_id,
+      payload: { total_criteria: gap.total },
     });
-  }
 
-  guardOutcomeTransition(current.status, 'VERIFIED');
+    // Trigger Goal.achieve check (DESIGN §8.3)
+    maybeAchieveGoal(store, outcome.goal_id);
 
-  const updated = store.casUpdate<Outcome>('outcomes', outcome_id, current.version, {
-    status: 'VERIFIED',
+    return parseOutcome(updated);
   });
-
-  store.emit({
-    event: 'OUTCOME_VERIFIED',
-    outcome_id,
-    goal_id: outcome.goal_id,
-    payload: { total_criteria: gap.total },
-  });
-
-  // Trigger Goal.achieve check (DESIGN §8.3)
-  maybeAchieveGoal(store, outcome.goal_id);
-
-  return parseOutcome(updated);
 }
 
 // =============================================================================
@@ -194,7 +169,10 @@ function maybeAchieveGoal(store: Store, goal_id: string): void {
   const allVerified = outcomes.every((o) => o.status === 'VERIFIED' || o.status === 'FAILED');
   if (!allVerified) return;
 
-  const verifiedCount = outcomes.filter((o) => o.status === 'VERIFIED').length;
+  const verifiedCount = outcomes.filter((o) => {
+    const gap = outcomeRemainingGap(store, o.id);
+    return o.status === 'VERIFIED' && gap.total > 0 && gap.remaining === 0;
+  }).length;
   if (verifiedCount !== outcomes.length) return; // some FAILED → don't auto-achieve
 
   const goal = store.get<{ status: string; version: number }>('goals', goal_id);

@@ -99,6 +99,7 @@ export interface CycleResult {
 
 export class AgentLoop {
   private stopping = false;
+  private wakeSleep?: () => void;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private store: Store;
   private dispatch?: (pick: SchedulePick) => Promise<void>;
@@ -133,9 +134,7 @@ export class AgentLoop {
 
   async start(): Promise<void> {
     // Register ourselves
-    if (this.mode === 'supervisor') {
-      supervisorStart(this.store, { pid: process.pid });
-    }
+    supervisorStart(this.store, { pid: process.pid });
     supervisorHeartbeat(this.store);
 
     // Periodic heartbeat (separate from cycle)
@@ -151,14 +150,17 @@ export class AgentLoop {
     const onSignal = (sig: string) => {
       this.log(`received ${sig}, stopping cleanly...`);
       this.stopping = true;
+      this.wakeSleep?.();
     };
-    process.on('SIGTERM', () => onSignal('SIGTERM'));
-    process.on('SIGINT', () => onSignal('SIGINT'));
+    const onTerm = () => onSignal('SIGTERM');
+    const onInt = () => onSignal('SIGINT');
+    process.on('SIGTERM', onTerm);
+    process.on('SIGINT', onInt);
 
     this.log(`agent loop started (mode=${this.mode}, pid=${process.pid})`);
 
     // Main loop
-    while (!this.shouldStop()) {
+    while (!this.stopping && !this.shouldStop()) {
       this.runId++;
       const runId = this.runId;
 
@@ -168,7 +170,7 @@ export class AgentLoop {
       } catch (e: any) {
         this.log(`cycle ${runId} crashed: ${e.message}`);
         // Don't die — sleep and retry
-        await sleep(this.intervals.slow);
+        await this.sleep(this.intervals.slow);
         continue;
       }
 
@@ -194,14 +196,14 @@ export class AgentLoop {
         );
       }
 
-      await sleep(result.next_sleep_ms);
+      await this.sleep(result.next_sleep_ms);
     }
 
     // Cleanup
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
-    if (this.mode === 'supervisor') {
-      supervisorStop(this.store, { reason: 'agent loop exit' });
-    }
+    process.off('SIGTERM', onTerm);
+    process.off('SIGINT', onInt);
+    supervisorStop(this.store, { reason: 'agent loop exit' });
     this.log(`agent loop stopped after ${this.totalCycles} cycles`);
   }
 
@@ -237,8 +239,8 @@ export class AgentLoop {
         }
       }
     } else {
-      // No dispatch handler — just count picks
-      dispatched = schedulerResult.picked.length;
+      // Monitor-only: selecting a task does not execute it.
+      dispatched = 0;
     }
 
     const durationMs = Date.now() - startMs;
@@ -292,6 +294,15 @@ export class AgentLoop {
   // Public metrics
   // ---------------------------------------------------------------------------
 
+  private sleep(ms: number): Promise<void> {
+    if (this.stopping || this.shouldStop()) return Promise.resolve();
+    return new Promise(resolve => {
+      const done = () => { clearTimeout(timer); this.wakeSleep = undefined; resolve(); };
+      const timer = setTimeout(done, ms);
+      this.wakeSleep = done;
+    });
+  }
+
   getStats() {
     return {
       started_at: this.startedAt,
@@ -306,7 +317,3 @@ export class AgentLoop {
 // =============================================================================
 // helpers
 // =============================================================================
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}

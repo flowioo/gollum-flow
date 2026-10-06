@@ -11,7 +11,7 @@
  * 不看 83%。
  */
 
-import type { Store } from '../store/store.js';
+import { StateConflictError, type Store } from '../store/store.js';
 import type { Task, Outcome, OutcomeStatus, AlignmentVerdict, TaskStatus } from '../model/types.js';
 import { outcomeRemainingGap } from '../../core/outcome.js';
 
@@ -51,9 +51,9 @@ export function pickNextTasks(
   const now = new Date().toISOString();
 
   // Step 1+2: SQL query joining tasks and outcomes
-  type Row = Task & { o_priority: number; o_status: string; o_title: string };
+  type Row = Task & { o_priority: number; o_status: string; o_title: string; o_goal_id: string };
   const rows = store.raw().prepare(`
-    SELECT t.*, o.priority AS o_priority, o.status AS o_status, o.title AS o_title
+    SELECT t.*, o.priority AS o_priority, o.status AS o_status, o.title AS o_title, o.goal_id AS o_goal_id
     FROM tasks t
     JOIN outcomes o ON t.outcome_id = o.id
     WHERE t.status IN ('PENDING', 'WAITING')
@@ -65,8 +65,7 @@ export function pickNextTasks(
       o.priority DESC,
       t.priority DESC,
       t.created_at ASC
-    LIMIT ?
-  `).all(now, now, limit) as unknown as Row[];
+  `).all(now, now) as unknown as Row[];
 
   // Step 3: refine ordering by remaining_gap (computed in JS since SQLite
   // can't easily count criteria by status from a join)
@@ -78,7 +77,7 @@ export function pickNextTasks(
       status: row.status as TaskStatus,
       phase: row.phase,
       priority: row.priority,
-      acceptance_criteria: row.acceptance_criteria as unknown as string[],
+      acceptance_criteria: JSON.parse(row.acceptance_criteria as unknown as string),
       alignment_verdict: row.alignment_verdict as AlignmentVerdict,
       alignment_reason: row.alignment_reason,
       owner: row.owner,
@@ -98,7 +97,7 @@ export function pickNextTasks(
     };
     const outcome: Outcome = {
       id: row.outcome_id,
-      goal_id: '',  // filled below
+      goal_id: row.o_goal_id,
       title: row.o_title,
       status: row.o_status as OutcomeStatus,
       criteria_ids: [],
@@ -119,6 +118,7 @@ export function pickNextTasks(
     if (a.gap.remaining !== b.gap.remaining) {
       return b.gap.remaining - a.gap.remaining;
     }
+    if (a.task.priority !== b.task.priority) return b.task.priority - a.task.priority;
     return a.task.created_at.localeCompare(b.task.created_at);
   });
 
@@ -136,7 +136,7 @@ export function pickNextTasks(
 export function findExpiredLeases(store: Store, now: Date = new Date()): Task[] {
   const rows = store.raw().prepare(`
     SELECT * FROM tasks
-    WHERE status = 'RUNNING'
+    WHERE status IN ('RUNNING', 'VERIFYING', 'RECOVERING')
       AND lease_until IS NOT NULL
       AND lease_until < ?
   `).all(now.toISOString()) as unknown as Task[];
@@ -149,25 +149,33 @@ export function findExpiredLeases(store: Store, now: Date = new Date()): Task[] 
  * This is recovery, not failure.
  */
 export function releaseExpiredLease(store: Store, task: Task, actor: string = 'scheduler'): Task {
-  // Force status back to PENDING (RUNNING + no lease = orphan; PENDING is the
-  // correct "ready to be picked again" state).
-  const released = store.casUpdate<Task>('tasks', task.id, task.version, {
-    status: 'PENDING',
-    owner: null,
-    lease_until: null,
+  return store.transaction(() => {
+    if (!['RUNNING', 'VERIFYING', 'RECOVERING'].includes(task.status) ||
+        !task.lease_until || new Date(task.lease_until).getTime() > Date.now()) {
+      throw new Error('Only expired active leases can be released');
+    }
+    const exhausted = task.retry_count >= 5;
+    // Force status back to PENDING (RUNNING + no lease = orphan; PENDING is the
+    // correct "ready to be picked again" state).
+    const released = store.casUpdate<Task>('tasks', task.id, task.version, {
+      status: exhausted ? 'BLOCKED' : 'PENDING',
+      retry_count: exhausted ? task.retry_count : task.retry_count + 1,
+      owner: null,
+      lease_until: null,
+    });
+    store.emit({
+      event: exhausted ? 'TASK_BLOCKED' : 'TASK_LEASE_EXPIRED',
+      task_id: task.id,
+      outcome_id: task.outcome_id,
+      actor,
+      payload: {
+        previous_owner: task.owner,
+        previous_lease_until: task.lease_until,
+        note: 'lease expired, task returned to PENDING for re-pick',
+      },
+    });
+    return released;
   });
-  store.emit({
-    event: 'TASK_LEASE_EXPIRED',
-    task_id: task.id,
-    outcome_id: task.outcome_id,
-    actor,
-    payload: {
-      previous_owner: task.owner,
-      previous_lease_until: task.lease_until,
-      note: 'lease expired, task returned to PENDING for re-pick',
-    },
-  });
-  return released;
 }
 
 /**
@@ -187,7 +195,8 @@ export function schedulerTick(store: Store, options: SchedulerOptions = {}): Sch
     try {
       released.push(releaseExpiredLease(store, t));
     } catch (e) {
-      // Skip on conflict (another scheduler reclaimed it)
+      // Skip only stale ownership, not storage errors.
+      if (!(e instanceof StateConflictError)) throw e;
       continue;
     }
   }
@@ -205,10 +214,6 @@ export function schedulerTick(store: Store, options: SchedulerOptions = {}): Sch
  * TimerWakeCondition: fires when fire_at <= now.
  * V0.1 only implements timer; github_pr / ci_status / webhook are V0.5+.
  */
-export interface TimerConfig {
-  fire_at: string; // ISO8601
-}
-
 export function timerShouldFire(taskWakeAt: string | null, now: Date = new Date()): boolean {
   if (!taskWakeAt) return true; // no wake_at → ready immediately
   return new Date(taskWakeAt) <= now;

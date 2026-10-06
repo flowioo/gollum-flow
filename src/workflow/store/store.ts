@@ -54,6 +54,7 @@ export class NotFoundError extends Error {
 
 export class Store {
   private db: DatabaseSync;
+  private transactionDepth = 0;
 
   constructor(dbPath: string, migrationDir: string) {
     // Ensure parent directory exists
@@ -270,14 +271,21 @@ export class Store {
   // ===========================================================================
 
   transaction<T>(fn: () => T): T {
-    this.db.exec('BEGIN');
+    const depth = this.transactionDepth++;
+    const savepoint = `gollum_${depth}`;
     try {
-      const result = fn();
-      this.db.exec('COMMIT');
-      return result;
-    } catch (e) {
-      this.db.exec('ROLLBACK');
-      throw e;
+      this.db.exec(depth === 0 ? 'BEGIN IMMEDIATE' : `SAVEPOINT ${savepoint}`);
+      try {
+        const result = fn();
+        this.db.exec(depth === 0 ? 'COMMIT' : `RELEASE ${savepoint}`);
+        return result;
+      } catch (e) {
+        this.db.exec(depth === 0 ? 'ROLLBACK' : `ROLLBACK TO ${savepoint}`);
+        if (depth > 0) this.db.exec(`RELEASE ${savepoint}`);
+        throw e;
+      }
+    } finally {
+      this.transactionDepth--;
     }
   }
 

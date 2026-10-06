@@ -163,11 +163,15 @@ export function recordExhaustion(
       .prepare(`
         UPDATE tasks
         SET status = 'WAITING',
+            wait_reason = 'quota',
+            version = version + 1,
+            updated_at = ?,
+            owner = NULL, lease_until = NULL,
             wake_at = ?,
             summary = COALESCE(summary, '') || ' [paused: quota exhausted]'
         WHERE status IN ('RUNNING', 'RECOVERING', 'VERIFYING')
       `)
-      .run(wakeAtIso);
+      .run(now.toISOString(), wakeAtIso);
 
     // Release leases (in case any RUNNING had owner/lease set)
     store.raw()
@@ -175,7 +179,7 @@ export function recordExhaustion(
         UPDATE tasks
         SET owner = NULL,
             lease_until = NULL
-        WHERE wake_at = ? AND owner IS NOT NULL
+        WHERE wait_reason = 'quota' AND wake_at = ? AND owner IS NOT NULL
       `)
       .run(wakeAtIso);
 
@@ -292,13 +296,17 @@ export function tickQuotaRecovery(store: Store, now: Date = new Date()): QuotaTi
       .prepare(`
         UPDATE tasks
         SET status = 'PENDING',
+            wait_reason = NULL,
+            version = version + 1,
+            updated_at = ?,
             wake_at = NULL,
             summary = COALESCE(summary, '') || ' [resumed after quota recovery]'
         WHERE status = 'WAITING'
+          AND wait_reason = 'quota'
           AND wake_at IS NOT NULL
           AND wake_at <= ?
       `)
-      .run(state.recovery_at);
+      .run(now.toISOString(), state.recovery_at);
     released = Number(result.changes);
 
     store.raw()

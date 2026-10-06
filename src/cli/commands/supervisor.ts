@@ -19,9 +19,10 @@
  */
 
 import { Command } from 'commander';
+import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, appendFileSync } from 'node:fs';
-import { getStore, resetStore } from '../../workflow/store/store.js';
+import { getStore, resetStore, resolveDefaultDbPath } from '../../workflow/store/store.js';
 import {
   defaultSupervisorPaths,
   readSupervisorStatus,
@@ -44,7 +45,7 @@ export function supervisorCommand(): Command {
     .option('--max-restarts <n>', 'Max consecutive restarts before giving up', (v) => parseInt(v, 10), 5)
     .option('--spawn-cmd <cmd>', 'Override spawn command (default: tsx + cli supervisor run-loop)')
     .action(async (opts) => {
-      const dbPath = process.env.GOLLUM_DB_PATH ?? './data/gollum.db';
+      const dbPath = resolveDefaultDbPath();
       const paths = defaultSupervisorPaths(dbPath);
 
       // Check if already running
@@ -58,7 +59,7 @@ export function supervisorCommand(): Command {
 
       const spawnCmd = opts.spawnCmd
         ? opts.spawnCmd.split(' ')
-        : ['npx', 'tsx', 'src/cli/index.ts', 'supervisor', 'run-loop'];
+        : [process.execPath, fileURLToPath(new URL('../index.js', import.meta.url)), 'supervisor', 'run-loop'];
 
       const env = {
         ...process.env,
@@ -67,10 +68,16 @@ export function supervisorCommand(): Command {
 
       if (opts.detach) {
         // Spawn detached
-        const child = spawn(spawnCmd[0]!, spawnCmd.slice(1), {
+        const parentArgs = [fileURLToPath(new URL('../index.js', import.meta.url)), 'supervisor', 'start', '--interval', String(opts.interval), '--max-restarts', String(opts.maxRestarts)];
+        if (opts.spawnCmd) parentArgs.push('--spawn-cmd', opts.spawnCmd);
+        const child = spawn(process.execPath, parentArgs, {
           detached: true,
           stdio: ['ignore', 'ignore', 'ignore'],
           env,
+        });
+        await new Promise<void>((done, reject) => {
+          child.once('spawn', done);
+          child.once('error', reject);
         });
         child.unref();
         console.log(`✓ Supervisor detached, parent_pid=${child.pid}`);
@@ -123,7 +130,8 @@ export function supervisorCommand(): Command {
         return;
       }
 
-      // Normal mode: 24/7 loop
+      log("Monitor-only: no dispatcher configured; tasks will not execute.");
+      // Normal mode: monitor loop
       const loop = new AgentLoop({ store, mode: 'worker', log });
       await loop.start();
     });
@@ -135,7 +143,7 @@ export function supervisorCommand(): Command {
     .command('stop')
     .description('Stop the running supervisor (sends SIGTERM)')
     .action(() => {
-      const dbPath = process.env.GOLLUM_DB_PATH ?? './data/gollum.db';
+      const dbPath = resolveDefaultDbPath();
       const paths = defaultSupervisorPaths(dbPath);
       const result = stopSupervisor(paths);
       if (!result.stopped) {
@@ -154,7 +162,7 @@ export function supervisorCommand(): Command {
     .description('Show supervisor + worker health')
     .action(() => {
       const store = getStore();
-      const dbPath = process.env.GOLLUM_DB_PATH ?? './data/gollum.db';
+      const dbPath = resolveDefaultDbPath();
       const paths = defaultSupervisorPaths(dbPath);
       const status = readSupervisorStatus(paths, store);
 
@@ -182,7 +190,7 @@ export function supervisorCommand(): Command {
     .description('Show recent supervisor log entries')
     .option('--tail <n>', 'Number of lines to show', (v) => parseInt(v, 10), 50)
     .action((opts) => {
-      const dbPath = process.env.GOLLUM_DB_PATH ?? './data/gollum.db';
+      const dbPath = resolveDefaultDbPath();
       const paths = defaultSupervisorPaths(dbPath);
       const logPath = paths.workerLogFile;
       if (!existsSync(logPath)) {

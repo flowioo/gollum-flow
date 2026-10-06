@@ -86,11 +86,12 @@ export function heartbeatCommand(): Command {
 
   cmd
     .command('ping <task_id>')
+    .option('--lease-token <token>', 'Token returned by a fenced claim')
     .description('Refresh heartbeat for a specific task (worker keeps alive)')
-    .action((task_id) => {
+    .action((task_id, opts) => {
       const store = getStore();
       try {
-        const task = taskHeartbeat(store, task_id, { pid: process.pid });
+        const task = taskHeartbeat(store, task_id, { pid: process.pid, lease_token: opts.leaseToken });
         console.log(`✓ Heartbeat refreshed for ${task.id.slice(-6)}`);
         console.log(`  heartbeat_at: ${task.heartbeat_at}`);
         console.log(`  lease_until:  ${task.lease_until}`);

@@ -17,7 +17,7 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,6 +28,7 @@ const CLI = join(ROOT, 'dist', 'cli', 'index.js');
 
 const built = existsSync(CLI);
 const skip = built ? false : 'dist/ not built — run `npm run build` first';
+const networkSkip = skip || (process.env.GOLLUM_NETWORK_TESTS !== '1' && 'opt in with GOLLUM_NETWORK_TESTS=1');
 
 let dbDir: string;
 let env: NodeJS.ProcessEnv;
@@ -36,6 +37,7 @@ function gollum(args: string[]): { out: string; code: number } {
   try {
     const out = execFileSync(process.execPath, [CLI, ...args], {
       env,
+      timeout: 20000,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -52,6 +54,7 @@ function gollum(args: string[]): { out: string; code: number } {
 before(() => {
   dbDir = mkdtempSync(join(tmpdir(), 'gollum-gh-'));
   env = { ...process.env, GOLLUM_DB_PATH: join(dbDir, 'gh.db') };
+  if (process.env.GOLLUM_NETWORK_TESTS !== '1') { env.GITHUB_TOKEN = 'fixture-token'; delete env.GH_TOKEN; }
 });
 
 /** Read-only GitHub calls need a token to be useful; skip the network otherwise. */
@@ -65,14 +68,19 @@ test('github auth reports which credential is in use', { skip }, () => {
   assert.ok(code === 0 || code === 1, `unexpected code ${code}: ${out}`);
 });
 
-test('github auth prefers the gh CLI credential store', { skip }, () => {
-  // A machine that only ran `gh auth login` has its token in gh's keyring, not
-  // in the environment. Before the fallback existed, every call here silently
-  // dropped to the 60/hour anonymous limit.
-  delete env.GITHUB_TOKEN;
-  delete env.GH_TOKEN;
-  const { out } = gollum(['github', 'auth']);
-  assert.doesNotMatch(out, /no GitHub token/, `gh keyring token not picked up: ${out}`);
+test('github auth falls back to the gh CLI credential store', { skip }, () => {
+  const binDir = mkdtempSync(join(tmpdir(), 'gollum-gh-bin-'));
+  const gh = join(binDir, 'gh');
+  writeFileSync(gh, '#!/bin/sh\nprintf "fixture-token\\n"\n');
+  chmodSync(gh, 0o755);
+  const previous = env;
+  try {
+    env = { ...env, PATH: `${binDir}:${env.PATH}`, GITHUB_TOKEN: '', GH_TOKEN: '' };
+    const { out, code } = gollum(['github', 'auth']);
+    assert.equal(code, 0);
+    assert.match(out, /gh auth token/);
+    assert.doesNotMatch(out, /fixture-token/);
+  } finally { env = previous; }
 });
 
 test('github --help lists every subcommand', { skip }, () => {
@@ -83,7 +91,7 @@ test('github --help lists every subcommand', { skip }, () => {
   }
 });
 
-test('a nonsense search term returns nothing, not the whole index', { skip }, () => {
+test('a nonsense search term returns nothing, not the whole index', { skip: networkSkip }, () => {
   // Regression: the query used to be dropped, so this matched every open issue
   // on GitHub and the command looked like it was working.
   const { out, code } = gollum([
@@ -94,7 +102,7 @@ test('a nonsense search term returns nothing, not the whole index', { skip }, ()
   assert.equal(found, 0, `query was ignored — GitHub returned ${found} issues for a nonsense term:\n${out.slice(0, 300)}`);
 });
 
-test('search output carries an actionable owner/repo#number', { skip }, () => {
+test('search output carries an actionable owner/repo#number', { skip: networkSkip }, () => {
   if (!authenticated()) return; // read-only calls still work unauthenticated, but be gentle
   const { out, code } = gollum(['github', 'search', 'is:issue typo', '--limit', '2']);
   assert.equal(code, 0, out);
@@ -105,7 +113,7 @@ test('search output carries an actionable owner/repo#number', { skip }, () => {
   }
 });
 
-test('search --json emits parseable JSON', { skip }, () => {
+test('search --json emits parseable JSON', { skip: networkSkip }, () => {
   const { out, code } = gollum(['github', 'search', 'is:issue typo', '--limit', '1', '--json']);
   assert.equal(code, 0, out);
   const parsed = JSON.parse(out);
@@ -122,14 +130,14 @@ test('github issue rejects a malformed owner/repo', { skip }, () => {
   assert.match(out, /expected owner\/repo/);
 });
 
-test('github issue surfaces a 404 rather than crashing', { skip }, () => {
+test('github issue surfaces a 404 rather than crashing', { skip: networkSkip }, () => {
   const { out, code } = gollum(['github', 'issue', 'cli/cli', '99999999']);
   assert.notEqual(code, 0);
   assert.match(out, /could not read issue/);
   assert.doesNotMatch(out, /TypeError|Cannot read properties/);
 });
 
-test('github issue prints title, state and body', { skip }, () => {
+test('github issue prints title, state and body', { skip: networkSkip }, () => {
   if (!authenticated()) return;
   const { out, code } = gollum(['github', 'issue', 'cli/cli', '11014']);
   assert.equal(code, 0, out);

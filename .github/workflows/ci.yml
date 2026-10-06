@@ -12,8 +12,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The package claims node >=18 in engines; verify the floor still holds.
-        node: ['18', '20', '22']
+        # node:sqlite is available without an experimental flag from 22.13.
+        node: ['22.13.0', '24']
 
     steps:
       - uses: actions/checkout@v4

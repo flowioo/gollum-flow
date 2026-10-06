@@ -134,6 +134,8 @@ export interface Task {
   alignment_reason: string | null;
   owner: string | null;
   lease_until: string | null;
+  lease_token?: string | null;
+  wait_reason?: string | null;
   wake_at: string | null;
   retry_count: number;
   next_action: string | null;
@@ -170,17 +172,6 @@ export interface Evidence {
   status: EvidenceStatus;
   data: Record<string, unknown> | null;
   observed_at: string;
-}
-
-export interface WorkflowEvent {
-  id: number;
-  task_id: string | null;
-  outcome_id: string | null;
-  goal_id: string | null;
-  event: string;
-  actor: string | null;
-  payload: Record<string, unknown> | null;
-  timestamp: string;
 }
 
 export interface Artifact {

@@ -17,6 +17,7 @@
  *   - ASSERTION_FAILED   → 提示 Task 重新执行代码修改
  */
 
+import { assertTaskLease } from './lease.js';
 import { type Store } from '../workflow/store/store.js';
 import {
   type Task,
@@ -85,6 +86,10 @@ export function decideRecovery(
   result: ToolResult,
 ): RecoveryDecision {
   const retryCount = task.retry_count;
+
+  if (retryCount >= 5) {
+    return { action: 'block', reason: `${retryCount} retries exhausted`, blocked_reason: 'Recovery budget exhausted; replan the outcome' };
+  }
 
   // 1. Specific failure-type strategies
   if (failureType === 'CAS_THRASHING') {
@@ -156,84 +161,79 @@ export function applyRecovery(
   task: Task,
   result: ToolResult,
   actor: string = 'recover-skill',
+  leaseToken?: string,
 ): ApplyRecoveryResult {
-  const failureType = classifyFailure(result);
-  const decision = decideRecovery(task, failureType, result);
+  return store.transaction(() => {
+    assertTaskLease(store.get<Task>('tasks', task.id), leaseToken);
+    if (!['RUNNING', 'VERIFYING', 'RECOVERING'].includes(task.status)) {
+      throw new Error(`Cannot recover task in ${task.status}`);
+    }
+    const failureType = classifyFailure(result);
+    const decision = decideRecovery(task, failureType, result);
 
-  if (decision.action === 'block') {
-    const updated = store.casUpdate<Task>('tasks', task.id, task.version, {
-      status: 'BLOCKED',
-      owner: null,
-      lease_until: null,
-      summary: decision.reason,
-    });
-    store.emit({
-      event: 'TASK_BLOCKED',
-      task_id: task.id,
-      outcome_id: task.outcome_id,
-      actor,
-      payload: {
-        reason: decision.blocked_reason ?? decision.reason,
-        failure_type: failureType,
-        retry_count: task.retry_count,
-        context: 'recover escalates to BLOCKED',
-      },
-    });
-    return { task: updated, decision };
-  }
+    if (decision.action === 'block') {
+      const updated = store.casUpdate<Task>('tasks', task.id, task.version, {
+        status: 'BLOCKED',
+        owner: null,
+        lease_until: null,
+        summary: decision.reason,
+      });
+      store.emit({
+        event: 'TASK_BLOCKED',
+        task_id: task.id,
+        outcome_id: task.outcome_id,
+        actor,
+        payload: {
+          reason: decision.blocked_reason ?? decision.reason,
+          failure_type: failureType,
+          retry_count: task.retry_count,
+          context: 'recover escalates to BLOCKED',
+        },
+      });
+      return { task: updated, decision };
+    }
 
-  if (decision.action === 'change_strategy') {
+    if (decision.action === 'change_strategy') {
+      const updated = store.casUpdate<Task>('tasks', task.id, task.version, {
+        status: 'RECOVERING',
+        retry_count: task.retry_count + 1,
+        summary: decision.reason,
+      });
+      store.emit({
+        event: 'RECOVERY_STARTED',
+        task_id: task.id,
+        outcome_id: task.outcome_id,
+        actor,
+        payload: {
+          failure_type: failureType,
+          retry_count: task.retry_count + 1,
+          strategy_hint: decision.strategy_hint,
+          reason: decision.reason,
+        },
+      });
+      return { task: updated, decision };
+    }
+
+    // 'retry' — keep RUNNING, bump retry_count
     const updated = store.casUpdate<Task>('tasks', task.id, task.version, {
-      status: 'RECOVERING',
       retry_count: task.retry_count + 1,
       summary: decision.reason,
     });
     store.emit({
-      event: 'RECOVERY_STARTED',
+      event: 'TASK_RETRIED',
       task_id: task.id,
       outcome_id: task.outcome_id,
       actor,
       payload: {
         failure_type: failureType,
         retry_count: task.retry_count + 1,
-        strategy_hint: decision.strategy_hint,
         reason: decision.reason,
       },
     });
     return { task: updated, decision };
-  }
-
-  // 'retry' — keep RUNNING, bump retry_count
-  const updated = store.casUpdate<Task>('tasks', task.id, task.version, {
-    retry_count: task.retry_count + 1,
-    summary: decision.reason,
   });
-  store.emit({
-    event: 'TASK_RETRIED',
-    task_id: task.id,
-    outcome_id: task.outcome_id,
-    actor,
-    payload: {
-      failure_type: failureType,
-      retry_count: task.retry_count + 1,
-      reason: decision.reason,
-    },
-  });
-  return { task: updated, decision };
 }
 
 // =============================================================================
 // Failure classification helpers (used by Skill recover)
 // =============================================================================
-
-/**
- * Identify the divergence between expected and actual.
- * Returns a human-readable description.
- */
-export function identifyDivergence(result: ToolResult): string {
-  if (result.status === 'PASS') return 'no divergence';
-  if (result.status === 'UNKNOWN') {
-    return `evidence insufficient: ${result.error?.message ?? 'unknown'}`;
-  }
-  return `expected PASS, got ${result.status}; ${result.observation}`;
-}

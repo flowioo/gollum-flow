@@ -24,67 +24,71 @@ export interface CriterionCreateInput {
 }
 
 export function criterionCreate(store: Store, input: CriterionCreateInput): Criterion {
-  if (!store.tryGet('outcomes', input.outcome_id)) {
-    throw new NotFoundError('outcomes', input.outcome_id);
-  }
-  if (!input.verifier) {
-    throw new Error(
-      'Verifier is required (PRD §7.4): criterion without verifier is UNVERIFIED and unusable',
-    );
-  }
+  return store.transaction(() => {
+    if (!store.tryGet('outcomes', input.outcome_id)) {
+      throw new NotFoundError('outcomes', input.outcome_id);
+    }
+    if (!input.verifier) {
+      throw new Error(
+        'Verifier is required (PRD §7.4): criterion without verifier is UNVERIFIED and unusable',
+      );
+    }
 
-  const now = new Date().toISOString();
-  const criterion: Criterion = {
-    id: ulid(),
-    outcome_id: input.outcome_id,
-    description: input.description,
-    verifier: input.verifier,
-    latest_evidence_id: null,
-    derived_status: 'UNVERIFIED', // remains UNVERIFIED until evidence attaches
-    version: 1,
-    created_at: now,
-    updated_at: now,
-  };
+    const now = new Date().toISOString();
+    const criterion: Criterion = {
+      id: ulid(),
+      outcome_id: input.outcome_id,
+      description: input.description,
+      verifier: input.verifier,
+      latest_evidence_id: null,
+      derived_status: 'UNVERIFIED', // remains UNVERIFIED until evidence attaches
+      version: 1,
+      created_at: now,
+      updated_at: now,
+    };
 
-  store.raw()
-    .prepare(
-      `INSERT INTO criteria (id, outcome_id, description, verifier, latest_evidence_id, derived_status, version, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      criterion.id,
+    store.raw()
+      .prepare(
+        `INSERT INTO criteria (id, outcome_id, description, verifier, latest_evidence_id, derived_status, version, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        criterion.id,
+        criterion.outcome_id,
+        criterion.description,
+        JSON.stringify(criterion.verifier),
+        criterion.latest_evidence_id,
+        criterion.derived_status,
+        criterion.version,
+        criterion.created_at,
+        criterion.updated_at,
+      );
+
+    reopenOutcome(store, criterion.outcome_id);
+
+    // Update Outcome.criteria_ids
+    const outcome = store.get<{ criteria_ids: string; version: number }>(
+      'outcomes',
       criterion.outcome_id,
-      criterion.description,
-      JSON.stringify(criterion.verifier),
-      criterion.latest_evidence_id,
-      criterion.derived_status,
-      criterion.version,
-      criterion.created_at,
-      criterion.updated_at,
     );
+    const ids = JSON.parse(outcome.criteria_ids) as string[];
+    ids.push(criterion.id);
+    store.casUpdate('outcomes', criterion.outcome_id, outcome.version, {
+      criteria_ids: JSON.stringify(ids) as unknown as string[],
+    });
 
-  // Update Outcome.criteria_ids
-  const outcome = store.get<{ criteria_ids: string; version: number }>(
-    'outcomes',
-    criterion.outcome_id,
-  );
-  const ids = JSON.parse(outcome.criteria_ids) as string[];
-  ids.push(criterion.id);
-  store.casUpdate('outcomes', criterion.outcome_id, outcome.version, {
-    criteria_ids: JSON.stringify(ids) as unknown as string[],
+    store.emit({
+      event: 'CRITERION_CREATED',
+      outcome_id: criterion.outcome_id,
+      payload: {
+        criterion_id: criterion.id,
+        description: criterion.description,
+        verifier_type: input.verifier.type,
+      },
+    });
+
+    return criterion;
   });
-
-  store.emit({
-    event: 'CRITERION_CREATED',
-    outcome_id: criterion.outcome_id,
-    payload: {
-      criterion_id: criterion.id,
-      description: criterion.description,
-      verifier_type: input.verifier.type,
-    },
-  });
-
-  return criterion;
 }
 
 // =============================================================================
@@ -132,52 +136,58 @@ export function criterionAttachEvidence(
   store: Store,
   input: AttachEvidenceInput,
 ): Criterion {
-  const criterion = store.get<Criterion>('criteria', input.criterion_id);
-  if (!criterion.verifier) {
-    throw new Error(`Criterion ${criterion.id} has no verifier, status is UNVERIFIED`);
-  }
+  return store.transaction(() => {
+    const criterion = store.get<Criterion>('criteria', input.criterion_id);
+    if (!criterion.verifier) {
+      throw new Error(`Criterion ${criterion.id} has no verifier, status is UNVERIFIED`);
+    }
 
-  // Persist evidence
-  store.raw()
-    .prepare(
-      `INSERT INTO evidences (id, criterion_id, executor, status, data, observed_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      input.evidence.id,
-      input.evidence.criterion_id,
-      input.evidence.executor,
-      input.evidence.status,
-      input.evidence.data ? JSON.stringify(input.evidence.data) : null,
-      input.evidence.observed_at,
+    if (input.evidence.criterion_id !== input.criterion_id) throw new Error('Evidence criterion mismatch');
+    if (!['PASS', 'FAIL', 'UNKNOWN'].includes(input.evidence.status)) throw new Error('Invalid evidence status');
+
+    // Persist evidence
+    store.raw()
+      .prepare(
+        `INSERT INTO evidences (id, criterion_id, executor, status, data, observed_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.evidence.id,
+        input.evidence.criterion_id,
+        input.evidence.executor,
+        input.evidence.status,
+        input.evidence.data ? JSON.stringify(input.evidence.data) : null,
+        input.evidence.observed_at,
+      );
+
+    // Derive new status (DESIGN §5.3)
+    const newStatus = deriveStatus(input.evidence.status);
+    const previousStatus = criterion.derived_status;
+    if (newStatus !== 'PASS') reopenOutcome(store, criterion.outcome_id);
+
+    const updated = store.casUpdate<Criterion>(
+      'criteria',
+      criterion.id,
+      criterion.version,
+      {
+        latest_evidence_id: input.evidence.id,
+        derived_status: newStatus,
+      },
     );
 
-  // Derive new status (DESIGN §5.3)
-  const newStatus = deriveStatus(input.evidence.status);
-  const previousStatus = criterion.derived_status;
+    store.emit({
+      event: newStatus === 'PASS' ? 'CRITERION_VERIFIED' : `CRITERION_${newStatus}`,
+      outcome_id: criterion.outcome_id,
+      payload: {
+        criterion_id: criterion.id,
+        from_status: previousStatus,
+        to_status: newStatus,
+        evidence_id: input.evidence.id,
+      },
+    });
 
-  const updated = store.casUpdate<Criterion>(
-    'criteria',
-    criterion.id,
-    criterion.version,
-    {
-      latest_evidence_id: input.evidence.id,
-      derived_status: newStatus,
-    },
-  );
-
-  store.emit({
-    event: newStatus === 'PASS' ? 'CRITERION_VERIFIED' : `CRITERION_${newStatus}`,
-    outcome_id: criterion.outcome_id,
-    payload: {
-      criterion_id: criterion.id,
-      from_status: previousStatus,
-      to_status: newStatus,
-      evidence_id: input.evidence.id,
-    },
+    return parseCriterion(updated);
   });
-
-  return parseCriterion(updated);
 }
 
 // =============================================================================
@@ -193,4 +203,13 @@ function parseCriterion(row: Criterion): Criterion {
     ...row,
     verifier: row.verifier ? JSON.parse(row.verifier as any) : null,
   };
+}
+function reopenOutcome(store: Store, outcomeId: string): void {
+  const outcome = store.get<{ status: string; version: number; goal_id: string }>('outcomes', outcomeId);
+  if (outcome.status !== 'VERIFIED') return;
+  store.casUpdate('outcomes', outcomeId, outcome.version, { status: 'IN_PROGRESS' });
+  const goal = store.get<{ status: string; version: number }>('goals', outcome.goal_id);
+  if (goal.status === 'achieved') store.casUpdate('goals', outcome.goal_id, goal.version, { status: 'active' });
+  store.emit({ event: 'OUTCOME_REOPENED', outcome_id: outcomeId, goal_id: outcome.goal_id,
+    payload: { reason: 'criteria or evidence changed' } });
 }

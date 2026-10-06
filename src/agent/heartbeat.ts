@@ -22,6 +22,7 @@
  *   - Emit TASK_STUCK_HEARTBEAT_STALE event
  */
 
+import { assertTaskLease } from '../core/lease.js';
 import { hostname } from 'node:os';
 import type { Store } from '../workflow/store/store.js';
 import type { Task } from '../workflow/model/types.js';
@@ -66,24 +67,27 @@ export const STUCK_RETRY_LIMIT = 2;
 export function taskHeartbeat(
   store: Store,
   task_id: string,
-  args: { pid?: number; note?: string } = {},
+  args: { pid?: number; note?: string; lease_token?: string } = {},
 ): Task {
-  const task = store.get<Task>('tasks', task_id);
-  if (task.status !== 'RUNNING' && task.status !== 'VERIFYING' && task.status !== 'RECOVERING') {
-    // Idempotent: don't bump heartbeat for tasks not actively running.
-    return task;
-  }
+  return store.transaction(() => {
+    const task = store.get<Task>('tasks', task_id);
+    assertTaskLease(task, args.lease_token);
+    if (task.status !== 'RUNNING' && task.status !== 'VERIFYING' && task.status !== 'RECOVERING') {
+      // Idempotent: don't bump heartbeat for tasks not actively running.
+      return task;
+    }
 
-  const now = new Date();
-  const newLease = new Date(now.getTime() + HEARTBEAT_STALE_MS).toISOString();
+    const now = new Date();
+    const newLease = new Date(now.getTime() + HEARTBEAT_STALE_MS).toISOString();
 
-  const updated = store.casUpdate<Task>('tasks', task.id, task.version, {
-    heartbeat_at: now.toISOString(),
-    lease_until: newLease,
-    worker_pid: args.pid ?? process.pid,
-    worker_host: hostname(),
+    const updated = store.casUpdate<Task>('tasks', task.id, task.version, {
+      heartbeat_at: now.toISOString(),
+      lease_until: newLease,
+      worker_pid: args.pid ?? process.pid,
+      worker_host: hostname(),
+    });
+    return updated;
   });
-  return updated;
 }
 
 // =============================================================================

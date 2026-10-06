@@ -78,19 +78,25 @@ export function defaultSupervisorPaths(dbPath: string): SupervisorPaths {
 // PID file helpers
 // =============================================================================
 
+/** POSIX reserves pid -1 and 0 as broadcast/invalid; never treat them as a live worker. */
+function isValidPid(pid: number | null | undefined): pid is number {
+  return pid !== null && pid !== undefined && Number.isSafeInteger(pid) && pid > 0;
+}
+
 function readPidFile(path: string): number | null {
   if (!existsSync(path)) return null;
   try {
     const content = readFileSync(path, 'utf-8').trim();
     const pid = parseInt(content, 10);
-    if (isNaN(pid)) return null;
-    return pid;
+    // Reject a pid file left behind by an earlier version that persisted a sentinel.
+    return isValidPid(pid) ? pid : null;
   } catch {
     return null;
   }
 }
 
 function writePidFile(path: string, pid: number): void {
+  if (!isValidPid(pid)) { clearPidFile(path); return; }
   writeFileSync(path, String(pid) + '\n');
 }
 
@@ -143,6 +149,8 @@ export class ParentSupervisor {
   private currentBackoffMs: number;
   private consecutiveRestarts = 0;
   private stopping = false;
+  private checking = false;
+  private spawnedAt = 0;
   private checkTimer: NodeJS.Timeout | null = null;
   private store: Store;
 
@@ -161,7 +169,12 @@ export class ParentSupervisor {
 
     // Start check loop
     const interval = this.opts.checkIntervalMs ?? 5_000;
-    this.checkTimer = setInterval(() => this.check(), interval);
+    this.checkTimer = setInterval(() => {
+      if (this.checking) return;
+      this.checking = true;
+      void this.check().catch((e) => this.log(`watchdog error: ${e.message}`))
+        .finally(() => { this.checking = false; });
+    }, interval);
 
     // Graceful shutdown
     const stop = async (signal: string) => {
@@ -202,9 +215,17 @@ export class ParentSupervisor {
       this.worker = null;
     });
 
+    child.on('error', (error) => {
+      this.log(`worker spawn failed: ${error.message}`);
+      if (this.worker === child) this.worker = null;
+      // A failed spawn has no pid; leaving the previous file behind would strand a
+      // stale pid that a later `supervisor stop` signals.
+      clearPidFile(this.opts.paths.workerPidFile);
+    });
     this.worker = child;
-    writePidFile(this.opts.paths.workerPidFile, child.pid ?? -1);
-    this.consecutiveRestarts = 0; // reset on successful spawn
+    this.spawnedAt = Date.now();
+    writePidFile(this.opts.paths.workerPidFile, child.pid ?? 0);
+    // Spawn is not proof of health; reset only after a stable run.
   }
 
   private async check(): Promise<void> {
@@ -212,17 +233,18 @@ export class ParentSupervisor {
 
     const health = supervisorHealth(this.store ?? (getStoreUncached()));
 
-    if (health.status === 'running' || health.status === 'stale') {
+    const alive = isValidPid(this.worker?.pid) && isPidAlive(this.worker.pid);
+    const uptime = Date.now() - this.spawnedAt;
+    if (alive && uptime < 30000) return; // startup grace
+    if (alive && health.status === 'running') {
       // Worker is alive (or just barely alive). Reset backoff.
+      if (uptime < 60000) return;
       this.consecutiveRestarts = 0;
       this.currentBackoffMs = this.opts.initialBackoffMs ?? 5_000;
       return;
     }
 
-    if (health.status === 'stopped') {
-      this.log(`worker stopped cleanly, not restarting`);
-      return;
-    }
+    // Unexpected child exit must restart even if its last DB state was stopped.
 
     // status === 'dead'
     const maxRestarts = this.opts.maxRestarts ?? 5;
@@ -241,12 +263,12 @@ export class ParentSupervisor {
     this.log(`worker heartbeat stale ${Math.round(health.stale_for_ms / 1000)}s, restarting in ${wait / 1000}s (attempt ${this.consecutiveRestarts}/${maxRestarts})`);
 
     // Kill any lingering process
-    if (this.worker?.pid) {
+    if (isValidPid(this.worker?.pid)) {
       try { process.kill(this.worker.pid, 'SIGTERM'); } catch { /* already exited */ }
       try { process.kill(this.worker.pid, 'SIGKILL'); } catch { /* already exited */ }
     }
     const oldPid = readPidFile(this.opts.paths.workerPidFile);
-    if (oldPid && oldPid > 0 && isPidAlive(oldPid)) {
+    if (isValidPid(oldPid) && isPidAlive(oldPid)) {
       try { process.kill(oldPid, 'SIGKILL'); } catch { /* already exited */ }
     }
 
@@ -270,7 +292,7 @@ export class ParentSupervisor {
   async stop(): Promise<void> {
     this.stopping = true;
     if (this.checkTimer) clearInterval(this.checkTimer);
-    if (this.worker?.pid) {
+    if (isValidPid(this.worker?.pid)) {
       try { process.kill(this.worker.pid, 'SIGTERM'); } catch { /* already exited */ }
       await sleep(2000);
       try { process.kill(this.worker.pid, 'SIGKILL'); } catch { /* already exited */ }
@@ -307,9 +329,9 @@ export function readSupervisorStatus(paths: SupervisorPaths, store: Store): Supe
 
   return {
     parent_pid: parentPid,
-    parent_alive: parentPid !== null && isPidAlive(parentPid),
+    parent_alive: isValidPid(parentPid) && isPidAlive(parentPid),
     worker_pid: workerPid,
-    worker_alive: workerPid !== null && isPidAlive(workerPid),
+    worker_alive: isValidPid(workerPid) && isPidAlive(workerPid),
     heartbeat_status: health.status,
     last_heartbeat_at: health.last_heartbeat_at,
     restart_count: health.restart_count,
@@ -326,10 +348,10 @@ export function stopSupervisor(paths: SupervisorPaths): { stopped: boolean; pare
   const parentPid = readPidFile(paths.parentPidFile);
   const workerPid = readPidFile(paths.workerPidFile);
 
-  if (workerPid && isPidAlive(workerPid)) {
+  if (isValidPid(workerPid) && isPidAlive(workerPid)) {
     try { process.kill(workerPid, 'SIGTERM'); stoppedAnything = true; } catch { /* already exited */ }
   }
-  if (parentPid && isPidAlive(parentPid)) {
+  if (isValidPid(parentPid) && isPidAlive(parentPid)) {
     try { process.kill(parentPid, 'SIGTERM'); stoppedAnything = true; } catch { /* already exited */ }
   }
 

@@ -15,7 +15,9 @@
  *   }
  */
 
-import { execSync } from 'node:child_process';
+import { captureEvidenceScope } from './evidence-scope.js';
+import { resolve } from 'node:path';
+import { exec, execSync } from 'node:child_process';
 import { type Store } from '../workflow/store/store.js';
 import { criterionAttachEvidence, criterionGet } from './criterion.js';
 import { ulid } from 'ulid';
@@ -100,67 +102,31 @@ export interface CommandVerifyConfig {
  */
 export async function verifyCommand(config: CommandVerifyConfig): Promise<ToolResult> {
   const timeout = config.timeout ?? 30000;
-
-  try {
-    const stdout = execSync(config.command, {
-      cwd: config.cwd ?? process.cwd(),
-      timeout,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    const exitCode = 0;
-
-    const expect = config.expect ?? { exit_code: 0 };
-    const evidence = {
-      command: config.command,
-      exit_code: exitCode,
-      stdout: stdout.slice(0, 4000),
-      stderr: '',
-    };
-
-    if (expect.exit_code !== undefined && expect.exit_code !== exitCode) {
-      return fail(
-        `command exited ${exitCode}, expected ${expect.exit_code}`,
-        'ASSERTION_FAILED',
-        `exit code mismatch`,
-        evidence,
-      );
-    }
-    if (expect.stdout_contains && !stdout.includes(expect.stdout_contains)) {
-      return fail(
-        `stdout missing expected substring "${expect.stdout_contains}"`,
-        'ASSERTION_FAILED',
-        'stdout does not contain expected substring',
-        evidence,
-      );
-    }
-
-    return pass(`command succeeded (exit ${exitCode})`, evidence);
-  } catch (e: any) {
-    const exitCode = e.status ?? -1;
-    const stdout = (e.stdout ?? '').toString().slice(0, 4000);
-    const stderr = (e.stderr ?? '').toString().slice(0, 4000);
-
-    const evidence = {
-      command: config.command,
-      exit_code: exitCode,
-      stdout,
-      stderr,
-    };
-
-    // Timeout → UNKNOWN (might be slow, not necessarily fail)
-    if (e.signal === 'SIGTERM' || e.code === 'ETIMEDOUT') {
-      return unknown(`command timed out after ${timeout}ms`, evidence, 'timeout');
-    }
-
-    return fail(
-      `command exited ${exitCode}`,
-      'ASSERTION_FAILED',
-      e.message ?? 'command failed',
-      evidence,
-      false,
-    );
+  if (!config.command || !Number.isFinite(timeout) || timeout <= 0) {
+    return fail('invalid command configuration', 'INVALID_CONFIG', 'command and positive timeout required');
   }
+  const cwd = resolve(config.cwd ?? process.cwd());
+  const execution = await new Promise<{ error: any; stdout: string; stderr: string }>((done) => {
+    exec(config.command, { cwd, timeout, maxBuffer: 1024 * 1024, encoding: 'utf8' },
+      (error, stdout, stderr) => done({ error, stdout, stderr }));
+  });
+  const { error, stdout, stderr } = execution;
+  const exitCode = error ? (typeof error.code === 'number' ? error.code : -1) : 0;
+  const evidence = { command: config.command, cwd, exit_code: exitCode,
+    stdout: stdout.slice(0, 4000), stderr: stderr.slice(0, 4000) };
+  if (error?.killed || error?.code === 'ETIMEDOUT') {
+    return unknown(`command timed out after ${timeout}ms`, evidence, 'timeout');
+  }
+  if (error && typeof error.code !== 'number') {
+    return unknown('command could not be fully observed', evidence, error.message);
+  }
+  const expected = config.expect ?? {};
+  if (exitCode !== (expected.exit_code ?? 0) ||
+      (expected.stdout_contains !== undefined && !stdout.includes(expected.stdout_contains)) ||
+      (expected.stderr_contains !== undefined && !stderr.includes(expected.stderr_contains))) {
+    return fail(`command expectations failed (exit ${exitCode})`, 'ASSERTION_FAILED', 'command output or exit code mismatch', evidence);
+  }
+  return pass(`command succeeded (exit ${exitCode})`, evidence);
 }
 
 // =============================================================================
@@ -337,6 +303,8 @@ export async function verifyByCriterion(
   }
 
   const verifier = criterion.verifier;
+  const scopeCwd = String(verifier.config.cwd ?? verifier.config.repo ?? process.cwd());
+  const before = captureEvidenceScope(scopeCwd);
   let result: ToolResult;
 
   switch (verifier.type) {
@@ -359,6 +327,15 @@ export async function verifyByCriterion(
       return fail(`unknown verifier type`, 'INVALID_CONFIG', 'unknown verifier type', { verifier_type: (verifier as any).type });
   }
 
+  const after = captureEvidenceScope(scopeCwd);
+  if (verifier.config.require_scope === true && (!before || !after)) {
+    result = unknown('required Git workspace scope is unavailable', result.evidence);
+  }
+  if (before && (!after || before.digest !== after.digest)) {
+    result = unknown('workspace changed during verification; rerun verification', result.evidence);
+  }
+  result.evidence = { ...result.evidence, scope: after, verifier_spec: JSON.stringify(verifier),
+    provenance: 'runtime-verifier' };
   // Attach evidence to criterion (auto-update derived_status)
   criterionAttachEvidence(store, {
     criterion_id,

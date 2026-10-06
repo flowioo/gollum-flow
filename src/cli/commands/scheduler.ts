@@ -67,10 +67,11 @@ export function schedulerCommand(): Command {
 
   cmd
     .command('release-expired')
-    .description('Release all expired leases')
-    .action(() => {
+    .description('Release expired leases (optionally one task)')
+    .option('--task-id <id>', 'Release only this task if its lease expired')
+    .action((opts) => {
       const store = getStore();
-      const expired = findExpiredLeases(store);
+      const expired = findExpiredLeases(store).filter(t => !opts.taskId || t.id === opts.taskId);
       let released = 0;
       for (const t of expired) {
         try {

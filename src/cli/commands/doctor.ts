@@ -55,9 +55,9 @@ export async function runDoctor(): Promise<{ ok: boolean; report: string[] }> {
   // 1. Node version
   const nodeVersion = process.version.replace(/^v/, '');
   const nodeMajor = parseInt(nodeVersion.split('.')[0] ?? '0', 10);
-  if (nodeMajor >= 18) ok(`Node.js ${nodeVersion} (>= 18 required)`);
+  if (nodeMajor > 22 || (nodeMajor === 22 && Number(nodeVersion.split('.')[1]) >= 13)) ok(`Node.js ${nodeVersion} (>= 22.13 required)`);
   else {
-    err(`Node.js ${nodeVersion} (< 18 required)`);
+    err(`Node.js ${nodeVersion} (< 22.13 required)`);
     errors.push('node version');
   }
 

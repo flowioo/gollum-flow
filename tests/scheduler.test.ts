@@ -153,7 +153,8 @@ describe('Scheduler / Lease expiry', () => {
       const goal = goalCreate(store, { project_id: project.id, title: 'g1' });
       const o = outcomeCreate(store, { goal_id: goal.id, title: 'o1' });
       const t = taskCreate(store, { outcome_id: o.id, title: 't1' });
-      taskClaim(store, { task_id: t.id, owner: 'agent', lease_ms: -1000 });
+      taskClaim(store, { task_id: t.id, owner: 'agent' });
+      store.raw().prepare('UPDATE tasks SET lease_until = ? WHERE id = ?').run(new Date(Date.now() - 1000).toISOString(), t.id);
 
       const expired = findExpiredLeases(store);
       assert.equal(expired.length, 1);
@@ -170,7 +171,8 @@ describe('Scheduler / Lease expiry', () => {
       const goal = goalCreate(store, { project_id: project.id, title: 'g1' });
       const o = outcomeCreate(store, { goal_id: goal.id, title: 'o1' });
       const t = taskCreate(store, { outcome_id: o.id, title: 't1' });
-      taskClaim(store, { task_id: t.id, owner: 'agent', lease_ms: -1000 });
+      taskClaim(store, { task_id: t.id, owner: 'agent' });
+      store.raw().prepare('UPDATE tasks SET lease_until = ? WHERE id = ?').run(new Date(Date.now() - 1000).toISOString(), t.id);
 
       const expired = findExpiredLeases(store);
       const released = releaseExpiredLease(store, expired[0]!);
@@ -190,7 +192,8 @@ describe('Scheduler / Lease expiry', () => {
       const goal = goalCreate(store, { project_id: project.id, title: 'g1' });
       const o = outcomeCreate(store, { goal_id: goal.id, title: 'o1' });
       const t = taskCreate(store, { outcome_id: o.id, title: 't1' });
-      taskClaim(store, { task_id: t.id, owner: 'agent', lease_ms: -1000 });
+      taskClaim(store, { task_id: t.id, owner: 'agent' });
+      store.raw().prepare('UPDATE tasks SET lease_until = ? WHERE id = ?').run(new Date(Date.now() - 1000).toISOString(), t.id);
 
       const expired = findExpiredLeases(store);
       releaseExpiredLease(store, expired[0]!);
@@ -214,7 +217,8 @@ describe('Scheduler / Lease expiry', () => {
       const o = outcomeCreate(store, { goal_id: goal.id, title: 'o1' });
 
       const t1 = taskCreate(store, { outcome_id: o.id, title: 't1' });
-      taskClaim(store, { task_id: t1.id, owner: 'agent', lease_ms: -1000 });
+      taskClaim(store, { task_id: t1.id, owner: 'agent' });
+      store.raw().prepare('UPDATE tasks SET lease_until = ? WHERE id = ?').run(new Date(Date.now() - 1000).toISOString(), t1.id);
 
       const t2 = taskCreate(store, { outcome_id: o.id, title: 't2' });
 
