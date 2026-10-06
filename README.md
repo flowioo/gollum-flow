@@ -7,10 +7,12 @@ Evidence → Checkpoint** in a durable store so a coding agent (Codex, Claude Co
 Mavis, Cursor…) can be killed and restarted without losing why it was working, where
 it got to, or what to do next.
 
-> Status: v0.2. Not yet published to the npm registry — install from a local tarball
+> Status: v0.2 experimental. Not yet published to the npm registry — install from a local tarball
 > (see below). The `npx skills add` route is **not implemented**; see "Skills" below.
 
 ## Install
+
+Requires **Node.js >=22.13.0** (`node:sqlite`).
 
 ```bash
 # from source (npm install runs `prepare`, which builds dist)
@@ -61,8 +63,10 @@ gollum init --cwd ~/code/other-repo  # bind a directory you are not standing in
 gollum init --force                  # rebind over an existing project.yaml
 ```
 
-Re-running is safe: an already-bound directory reports `Already bound` and
-changes nothing. `gollum project` has **no delete command**, which is why `init`
+Re-running is safe: an already-bound directory reports `Already bound`, keeps
+the same project identity and refreshes only the managed recovery-instruction
+blocks in `CLAUDE.md` and `AGENTS.md`. Existing user instructions are preserved.
+Use `gollum init --no-context` to bind without installing these blocks. `gollum project` has **no delete command**, which is why `init`
 reuses an existing Project by name instead of creating a second one.
 
 > `.gollum/project.yaml` is named `.yaml` but is parsed with `JSON.parse` —
@@ -204,6 +208,8 @@ gollum task list -o "$OUTCOME_ID"
 gollum evidence list -c "$CRITERION_ID"
 gollum scheduler tick
 gollum goal-align <task_id>
+gollum handle-uncertain <task_id>    # uncertain → replan 信号（task 不暂停）
+gollum handle-misaligned <task_id>   # misaligned → pause + rollback
 gollum recover <task_id>
 ```
 
@@ -212,7 +218,7 @@ gollum recover <task_id>
 ```bash
 npm run typecheck
 npm run lint
-npm test                      # 171 tests
+npm test                      # offline regression suite
 npm run build
 bash tests/_v02_install_e2e.sh            # install E2E (isolated HOME, includes Claude)
 GOLLUM_E2E_SKIP_CLAUDE=1 bash tests/_v02_install_e2e.sh   # skip the Claude step
@@ -224,11 +230,43 @@ with an isolated `HOME`, asserts the three `bin` entries are executable and
 inside the tarball install (not the dev tree), runs `gollum doctor`, and —
 unless skipped — has Claude Code read the installed `SKILL.md`.
 
+## Recovery and autonomous operation
+
+```bash
+gollum status                 # current project, evidence gaps and checkpoints
+gollum resume --json          # structured context; does not claim or execute
+```
+
+On Gollum continuation requests, the installed project instructions require
+`resume --json` before planning or switching workflows. Its `decision.action`
+reports `complete`, `no_work`, `resume`, `reverify`, `wait` or `needs_attention`.
+Finished plans stop; an empty spec directory is never treated as missing Gollum
+work. Re-run `gollum init` in existing projects to install this entry point.
+The generated instructions pin the local runtime; regenerate them when moving
+an installation and review machine-specific paths before sharing those files.
+These are host instructions, not a sandbox that can force model compliance.
+
+`gollum improve start --config /path/to/improve.json` runs bounded autonomous
+improvement experiments through Claude Code: reproduce a failure, implement,
+independently verify, review, and retain the accepted change for the next round.
+See [self-improvement configuration and limits](docs/SELF-IMPROVEMENT.md).
+`supervisor start` remains a **monitor** for generic tasks; it does not dispatch
+these experiments. See [autonomy readiness](docs/AUTONOMY.md) for remaining gates.
+
+For integrated workers use `gollum task claim "$TASK_ID" -o worker --fenced` and
+pass the returned `--lease-token` to task mutations and heartbeat commands.
+Legacy manual claims remain compatible. Tokens reject stale state writes;
+they do not stop an old process from modifying files.
+
+Runtime verification records Git workspace scope when available. Old PASS
+records become UNKNOWN in `remaining-gap` after code changes. Historical
+Evidence is retained. Manual evidence and unscoped checks remain trusted input,
+not independent proof suitable for unattended completion.
+
 ## Known gaps (v0.2)
 
 - Not published to npm
 - `npx skills add` integration not implemented
-- `templates/AGENTS.md` not implemented
 - Task `shape` (ship/scout) field not implemented
 - bash watcher / scheduler wake events not implemented
 - `gollum memory.read/write` not implemented
@@ -239,7 +277,7 @@ See `docs/PRD-v0.2.md` §5 for the shipped/not-implemented breakdown.
 ## Contributing
 
 `npm run lint && npm run typecheck && npm test` is the full local gate; CI runs
-the same three on Node 18/20/22 plus a `npm pack` assertion that the nine skills,
+the same three on Node 22.13/24 plus a `npm pack` assertion that the nine skills,
 the slash-command bundle and the three `bin` entries actually ship. A PR that
 says "verified" without pasting the real command output is not verified — the
 state layer's whole premise is *no evidence, not verified*.

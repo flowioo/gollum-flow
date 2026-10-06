@@ -1,5 +1,7 @@
 # Gollum V0.2 — Product Requirements Document
 
+> 当前实现边界以 [AUTONOMY.md](./AUTONOMY.md) 为准：通用任务监控与 `gollum improve` 自主改进实验是两个独立入口。下文中的 MCP、YAML 存储和 24/7 自主执行示例是历史方案，不代表已交付能力。
+
 > **Status**: Draft V0.2 (2026-09-28)
 > **Audience**: Gollum maintainers, contributors, design reviewers
 > **Supersedes**: `docs/PRD.md` (V0.1)
@@ -29,7 +31,7 @@ Gollum 是一个**项目级长期状态层**，让任意 Coding Agent（Codex / 
 - **纯 Memory 系统**（如 Mavis Memory）：不隔离项目，容易串线。
 - **手工写 `claude.md` / `AGENTS.md`**：每次重启要让 Agent 自己重读，没有结构化状态。
 
-Gollum 不做调度，不做编排，不替代 Host Agent。它**只负责项目级长期事实**。
+Gollum 的核心负责项目级长期事实；可选 scheduler/watchdog 提供任务选择与故障监控。`gollum improve` 通过内置 Claude adapter 执行独立的自主改进实验；通用任务队列仍需集成 dispatcher。
 
 ---
 

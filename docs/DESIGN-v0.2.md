@@ -1,5 +1,7 @@
 # Gollum V0.2 — Technical Design
 
+> 当前实现边界以 [AUTONOMY.md](./AUTONOMY.md) 为准：通用任务监控与 `gollum improve` 自主改进实验是两个独立入口。下文中的 MCP、YAML 存储和 24/7 自主执行示例是历史方案，不代表已交付能力。
+
 > **Status**: Draft V0.2 (2026-09-28)
 > **Companion to**: `docs/PRD-v0.2.md`
 > **Supersedes**: `docs/DESIGN.md` (V0.1)

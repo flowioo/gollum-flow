@@ -1,5 +1,7 @@
 # Gollum V0.2 — Agent Self-Evolution Layer
 
+> 当前实现边界以 [AUTONOMY.md](./AUTONOMY.md) 为准：通用任务监控与 `gollum improve` 自主改进实验是两个独立入口。下文中的 MCP、YAML 存储和 24/7 自主执行示例是历史方案，不代表已交付能力。
+
 > 让 Coding Agent 24/7 不间断运行。自动处理 API 配额耗尽、自动检测卡死、自动恢复。
 
 ## 1. 目标
