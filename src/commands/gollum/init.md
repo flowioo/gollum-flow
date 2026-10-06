@@ -13,11 +13,12 @@ allowed-tools: Bash(gollum:*)
 1. 运行绑定（`$ARGUMENTS` 非空时当作项目名传入）：
 
    ```bash
-   gollum init $ARGUMENTS
+   gollum init
+   # 若提供了项目名，使用：gollum init --name "项目名"
    ```
 
    这一条命令会做三件事：按目录名查找已有的 Project（找到就复用，找不到才新建）、
-   写 `.gollum/project.yaml`、打印 Project ID。`gollum project` 没有 delete 命令，
+   写 `.gollum/project.yaml`、安装保留用户原文的 CLAUDE.md / AGENTS.md 恢复入口、打印 Project ID。`gollum project` 没有 delete 命令，
    所以复用是必须的。
 
 2. 验证绑定真的生效：
@@ -33,7 +34,7 @@ allowed-tools: Bash(gollum:*)
 
 ## 边界
 
-- 只做绑定。**不要**顺手建 Goal / Outcome / Task —— 那是 `/gollum:plan` 的事。
+- 只做绑定。**不要**顺手建 Goal / Outcome / Task —— 那是后续规划任务的事。
 - 已经绑定过时 `gollum init` 会直接返回 "Already bound"，这是正常的，报告一下即可，
   不要加 `--force` 重新绑。
 - 如果目录在 git 仓库里，提醒用户把 `.gollum/` 加进 `.gitignore`：里面的 Project ID

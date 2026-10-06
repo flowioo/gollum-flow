@@ -1,103 +1,50 @@
 ---
 name: gollum-bootstrap
 description: |
-  Bootstrap Gollum context on Host startup or directory change. Use when
-  the user opens the project for the first time, switches directories, or
-  asks "continue this project". Calls gollum-resolver, loads Goal/Outcome/
-  Task from ~/.gollum/<project>/, and injects a compact context block.
-  Also creates .gollum/project.yaml on `gollum init`.
+  Load the current project's SQLite Goal, Task, Evidence and checkpoints with
+  gollum resume --json when the user asks to continue Gollum work or enters a
+  Gollum-managed project. Does not create plans or start other workflows.
 ---
 
-# gollum-bootstrap
+# Gollum bootstrap
 
-## When to Use
-
-- Host (Codex / Claude Code / Mavis) just started in a project directory
-- User runs `cd` into a different project
-- User says: "继续这个项目" / "continue this project" / "where were we"
-- User runs `gollum init` for the first time
-
-## Inputs
-
-- `$PWD` (current working directory)
-
-## Procedure
-
-1. **Run resolver** to discover the project:
-   ```bash
-   gollum-resolver notify-cwd "$PWD"
-   ```
-   Returns `{ project_id, source, repo_root }` or `{ project_id: null }` for unmanaged directories.
-
-2. **If the current Project has unfinished work** (a task in RUNNING/RECOVERING
-   whose lease is stale):
-   a. Record where you stopped so a later session can pick it up:
-      ```bash
-      gollum task checkpoint <task_id> -s "切换前状态"
-      ```
-   b. Hand the lease back:
-      ```bash
-      gollum task wait <task_id>
-      ```
-
-3. **Load project state**:
-   ```bash
-   gollum goal list --tree          # 全树，一眼看清 Goal→Outcome→Task
-   gollum task list --status RUNNING
-   gollum task list --status RECOVERING
-   gollum evidence list
-   ```
-
-4. **Inject compact context** (do NOT inline in user-visible chat):
-   ```
-   [Gollum] Project: <name> (<id>)
-   [Gollum] Goal: <title>
-   [Gollum] Active Outcome: <id> <title>
-   [Gollum] Current Task: <id> <title>
-   [Gollum] Last Evidence: <id> <verifier> <result>
-   [Gollum] Mode: managed | aware
-   ```
-
-5. **Select mode**:
-   - `managed` if there's an active `PENDING` or `RUNNING` task
-   - `aware` otherwise (just discussion / exploration)
-
-## First time in a directory
-
-If there is no Gollum state yet and the user wants to start tracking work here:
+For a Gollum continuation request, start with:
 
 ```bash
-gollum init                 # 建/复用 Project + 写 .gollum/project.yaml
-gollum resolver notify-cwd "$PWD"   # 验证绑定
+gollum resume --json
 ```
 
-`gollum init` takes no required arguments — the Project name defaults to the
-directory name. It is **idempotent**: already-bound directories report
-`Already bound` and write nothing, and an existing Project with the same name is
-reused rather than duplicated (there is no `project delete`).
+If the project's CLAUDE.md / AGENTS.md supplies a specific Node + CLI path, use
+that runtime in place of `gollum` for every command. Do not silently use an older
+installation.
 
-Verify before doing anything else. If `notify-cwd` does not return
-`project_id` + `source: "project-yaml"`, the directory is still unbound — report
-that and stop rather than writing to the store. Then use `gollum-plan` to turn
-what the user said into Goal / Outcome / Task.
+The command resolves `.gollum/project.yaml` upward from cwd and reads the local
+SQLite store. The binding file contains identity, not tasks. Do not search for
+checkpoint files or use chat memory / spec-workflow as substitutes for the store.
 
-## Outputs
+Read `decision`, existing Goal/Outcome/Task IDs, `criteria.latest_evidence`, and
+task `summary`, `observation`, `next_action`, lease and wake time. State the task
+ID and next action before implementation so the user can verify the handoff.
 
-- Compact context block in Host memory
-- Mode selected (managed / aware / unmanaged)
-- For unmanaged directories: a clear message that this is a scratch / non-Gollum directory and no Store writes are allowed
+| decision.action | Behavior |
+|---|---|
+| complete / no_work | Report that no unfinished Gollum work exists and stop. |
+| resume | Inspect actual files, then continue only the listed existing tasks. |
+| reverify | Run the specified outcomes' existing Criterion verifiers; save evidence. |
+| wait | Respect the live lease, wake time or quota. Do not duplicate the task. |
+| needs_attention | Explain blocked/failed/inconsistent state; do not invent new work. |
 
-## Anti-Patterns
+If loading fails, report the exact error. A missing binding is not permission to
+create another plan; initialize only if the user requests it. Never claim that
+state was loaded when no CLI output was obtained.
 
-- ❌ Do NOT skip the resolver and read `~/.gollum/` directly — you'll get the wrong project's state on Project Switch.
-- ❌ Do NOT inline the Goal in the user-visible chat — only put it in Context.
-- ❌ Do NOT write to the Store from `unmanaged` mode (no project found).
-- ❌ Do NOT auto-modify the Goal (requires explicit user ack).
-- ❌ Do NOT claim a task that already has a non-expired lease held by another session.
+## Workflow boundary
 
-## Recovery
+A plugin's `requirements-needed` response or an empty `.spec-workflow/specs/`
+directory does not define remaining Gollum work. Use another workflow only when
+explicitly requested by the user or required by an existing Gollum task. Available
+tools do not grant permission to add requirements, specs, approvals or tasks.
 
-If bootstrap fails (e.g., store is locked, schema drift, missing migration):
-1. Run `gollum doctor` for diagnostics.
-2. If schema drift: run migrations (built into `gollum init` if missing).
-3. If lock persists: wait 30s (lease timeout) and retry.
+Bootstrap is read-only: it does not checkpoint, release leases, create tasks,
+change goals or install unrelated project tooling. After loading state, use the
+Gollum task resume skill when execution is needed.

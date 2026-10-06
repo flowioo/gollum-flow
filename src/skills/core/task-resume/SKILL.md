@@ -1,109 +1,80 @@
 ---
 name: gollum-task-run-resume
 description: |
-  Resume an interrupted Gollum Task after the agent process died, using the
-  `gollum` CLI. Reads the persisted state and continues from where it stopped
-  instead of restarting. No MCP.
+  Continue existing Gollum work across sessions or crashes from SQLite state and
+  checkpoints. Use for "continue Gollum" or interrupted tasks; stop if the stored
+  plan is complete. Do not replace recovery with a new spec or plan.
 ---
 
-# gollum-task-run-resume
+# Resume existing Gollum work
 
-## Goal
-
-跨 Session 恢复 Task。进程死了、Session 没了、换了个 agent——状态还在库里，接着干。
-
-## When to Use
-
-- Host 进程被 kill / 崩溃 / 重启后
-- 用户说「继续」「接着上次」
-- 发现有 `RUNNING` 但心跳已死的 task
-
-**不用于**：正常的新任务（用 `gollum-task-run`）。
-
-## 铁律
-
-> **先 Observe，再 Action。** 不要在没读状态的情况下重跑命令。
-
-## Procedure
-
-### 1. 找有没有该恢复的活儿
+## Load before acting
 
 ```bash
-gollum heartbeat status        # 哪些 task/supervisor 心跳死了
-gollum task list --status RUNNING
-gollum task list --status RECOVERING
+gollum resume --json
 ```
 
-### 2. 读它停在哪
+Use the runtime path in the project's CLAUDE.md / AGENTS.md if one is specified.
+Do not search for checkpoint files: checkpoints are persisted task fields in SQLite.
+
+Read `decision` first. `complete` / `no_work` means report no unfinished work and
+stop; `wait` means respect lease, wake time or quota; `needs_attention` means
+report the blocker, not manufacture a new task. `reverify` means use the listed
+existing criteria without creating implementation work.
+
+For `resume`, choose an existing ID from `decision.task_ids`, read its goal,
+acceptance criteria, checkpoint (`summary`, `observation`, `next_action`) and
+lease. Report that ID and the planned continuation, then inspect the actual files.
 
 ```bash
 gollum task show "$TASK_ID"
 ```
 
-重点看：
+## Reclaim and continue
 
-- `acceptance_criteria` — 还没满足的
-- `lease_until` — 上一任的 lease 是否已过期
-- `retry_count` — 试过几次
-- `summary` / `last_observation` — 上次记下的观察
-
-### 3. 检查 checkpoint
+Never override a valid lease. For an expired RUNNING / VERIFYING / RECOVERING
+lease, release only the chosen task, then re-read it (the retry budget may block it):
 
 ```bash
-gollum task list --status RUNNING     # 再确认一次状态
+gollum scheduler release-expired --task-id "$TASK_ID"
+gollum task show "$TASK_ID"
 ```
 
-checkpoint 存在 task 的 `summary` / `phase` 字段里。**这是崩溃后唯一能拿回来的进度线索。**
-
-### 4. 判断 lease 能不能抢
+For an eligible PENDING task or a due WAITING task, claim with a fresh session owner:
 
 ```bash
-# lease 未过期（默认 30 分钟）→ 等，或者问用户要不要强制接管
-# lease 已过期 → 直接 claim
-gollum task claim "$TASK_ID" -o "agent-session-2"
+gollum task claim "$TASK_ID" -o "new-session" --fenced
 ```
 
-claim 失败说明别人还持有 lease。**不要绕过**，等它过期或让用户决定。
-
-### 5. 接着干
+Keep the returned token as `LEASE_TOKEN`; use it on subsequent mutations. Inspect
+existing work before editing; don't repeat implementation merely because the
+conversation is new. For long-running work refresh the lease before it expires:
 
 ```bash
-# 先重新对齐目标（上下文丢了，可能已经跑偏）
-gollum goal-align "$TASK_ID"
-
-# 重新跑一遍验收，确认之前的修改还在
-gollum verify command -c "npm test"
-
-# 接着推进，每个里程碑存 checkpoint
-gollum task checkpoint "$TASK_ID" -s "恢复自上一 checkpoint，已重跑校验通过"
+gollum heartbeat ping "$TASK_ID" --lease-token "$LEASE_TOKEN"
+gollum task checkpoint "$TASK_ID" -s "实际进展" --next-action "剩余动作" --lease-token "$LEASE_TOKEN"
 ```
 
-### 6. 反复失败的处理
+Use the existing Criterion ID and configured verifier so a test run persists evidence:
 
 ```bash
-gollum task fail "$TASK_ID" -r "第 N 次仍失败"
-gollum recover "$TASK_ID"
+gollum verify criterion "$CRITERION_ID"
 ```
 
-`retry_count` 增长到 5 会自动 `block`，等人工介入。**别硬重试。**
+Read the result and effective remaining gap before marking completion. On success:
 
-## 环境观察优先
+```bash
+gollum task complete "$TASK_ID" -s "已运行验收并保存证据" --lease-token "$LEASE_TOKEN"
+gollum outcome mark-verified "$OUTCOME_ID"
+```
 
-原则 3：**Environment > Memory > Checkpoint**。
+On failure, checkpoint what was observed and use bounded recovery with the actual
+failure result. Do not mark a task FAILED and then try to recover that terminal
+state. Do not restart DONE tasks or weaken criteria just to achieve the goal.
 
-恢复时先确认真实环境状态（文件改没改、测试过没过），**再**参考 checkpoint 里的记录。
-checkpoint 可能过期，环境不会骗人。
+## Stay in scope
 
-## Anti-Patterns
-
-- ❌ 不要跳过 `task show` 就动手
-- ❌ 不要忽略 `lease_until` 强行 claim
-- ❌ 不要因为「不记得做过什么」就重跑所有命令——先 verify 看现状
-- ❌ 不要假设上次的修改还在——先 verify
-- ❌ 不要用 MCP 工具
-
-## 相关
-
-- `gollum-task-run` — 正常开新活
-- `gollum-recover` — 失败分类与策略
-- `gollum-verify` — 怎么产出证据
+Do not create Requirements / Design / Tasks documents, invoke spec-workflow, or
+initialize another workflow merely because its directories or tools exist. Those
+steps require an explicit user request or an existing Gollum task that calls for
+them. Tool output from a different workflow cannot redefine Gollum's remaining work.

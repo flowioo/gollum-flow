@@ -3,6 +3,9 @@
  * Gollum CLI — entry point (DESIGN §11)
  */
 
+import { installProjectContext } from '../adapters/project-context.js';
+import { statusCommand } from './commands/status.js';
+import { improveCommand } from './commands/improve.js';
 import { Command } from 'commander';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -87,6 +90,7 @@ program
   .option('-d, --description <desc>', 'Project description')
   .option('--cwd <dir>', 'Target directory (default: current directory)')
   .option('--force', 'Overwrite an existing .gollum/project.yaml', false)
+  .option('--no-context', 'Skip managed CLAUDE.md / AGENTS.md recovery instructions')
   .action(async (opts) => {
     const store = getStore();
     const targetDir = resolvePath(opts.cwd ?? process.cwd());
@@ -108,7 +112,11 @@ program
       }
       console.log(`✓ Already bound — ${yamlPath}`);
       console.log(`  Project ID: ${projectId}`);
-      console.log('  Nothing changed. Re-run with --force to rebind to a different project.');
+      if (opts.context) {
+        const changed = installProjectContext(targetDir);
+        console.log(`  Recovery context: ${changed.length ? changed.join(', ') : 'up to date'}`);
+      }
+      console.log('  Project binding unchanged. Re-run with --force to rebind.');
       return;
     }
 
@@ -126,6 +134,7 @@ program
       'utf-8',
     );
 
+    if (opts.context) installProjectContext(targetDir);
     console.log(`✓ Gollum initialized`);
     console.log(`  Project: ${project.name} (${project.id})${existingProject ? '  [reused]' : ''}`);
     console.log(`  Bound:   ${yamlPath}`);
@@ -138,6 +147,10 @@ program
 // =============================================================================
 // project
 // =============================================================================
+program.addCommand(statusCommand('status'));
+program.addCommand(statusCommand('resume'));
+program.addCommand(improveCommand());
+
 const project = program.command('project').description('Manage projects');
 project
   .command('create')
@@ -461,6 +474,11 @@ task
     console.log(`  owner: ${t.owner ?? '-'}`);
     console.log(`  lease_until: ${t.lease_until ?? '-'}`);
     console.log(`  retry_count: ${t.retry_count}`);
+    console.log(`  phase: ${t.phase ?? '-'}`);
+    console.log(`  summary: ${t.summary ?? '-'}`);
+    console.log(`  last_observation: ${t.last_observation ?? '-'}`);
+    console.log(`  next_action: ${t.next_action ?? '-'}`);
+    console.log(`  wake_at: ${t.wake_at ?? '-'}`);
     console.log(`  estimated_minutes: ${t.estimated_minutes ?? '-'}`);
     console.log(`  Outcome: ${outcome.title} [${outcome.status}]`);
     console.log(`  Goal: ${goal.title} [${goal.status}]`);
@@ -468,11 +486,13 @@ task
 task
   .command('claim <task_id>')
   .description('Claim task with lease')
+  .option('--fenced', 'Require the returned lease token on subsequent writes')
   .requiredOption('-o, --owner <owner>', 'Owner (e.g., codex/session-abc)')
   .action((id, opts) => {
     const store = getStore();
     try {
-      const t = taskClaim(store, { task_id: id, owner: opts.owner });
+      const t = taskClaim(store, { task_id: id, owner: opts.owner, fenced: opts.fenced });
+      if (t.lease_token) console.log(`lease_token=${t.lease_token}`);
       console.log(`✓ Task claimed: ${t.id}  status=${t.status}  lease_until=${t.lease_until}`);
     } catch (e: any) {
       console.error(`✗ ${e.message}`);
@@ -481,6 +501,7 @@ task
   });
 task
   .command('checkpoint <task_id>')
+  .option('--lease-token <token>', 'Token returned by a fenced claim')
   .description('Create semantic checkpoint')
   .requiredOption('-s, --summary <summary>', 'Summary')
   .option('-o, --observation <obs>', 'Last observation')
@@ -493,29 +514,32 @@ task
       observation: opts.observation,
       next_action: opts.nextAction,
       artifacts: opts.artifacts,
-    });
+    }, opts.leaseToken);
     console.log(`✓ Checkpoint created: ${t.id}`);
   });
 task
   .command('complete <task_id>')
+  .option('--lease-token <token>', 'Token returned by a fenced claim')
   .description('Mark task DONE')
   .option('-s, --summary <summary>', 'Final summary')
   .action((id, opts) => {
     const store = getStore();
-    const t = taskComplete(store, id, opts.summary);
+    const t = taskComplete(store, id, opts.summary, opts.leaseToken);
     console.log(`✓ Task DONE: ${t.id}`);
   });
 task
   .command('fail <task_id>')
+  .option('--lease-token <token>', 'Token returned by a fenced claim')
   .description('Mark task FAILED')
   .requiredOption('-r, --reason <reason>', 'Reason')
   .action((id, opts) => {
     const store = getStore();
-    const t = taskFail(store, { task_id: id, reason: opts.reason });
+    const t = taskFail(store, { task_id: id, lease_token: opts.leaseToken, reason: opts.reason });
     console.log(`✓ Task FAILED: ${t.id}`);
   });
 task
   .command('wait <task_id>')
+  .option('--lease-token <token>', 'Token returned by a fenced claim')
   .description('Mark task WAITING (release lease)')
   .requiredOption('--wake-at <iso>', 'Wake at (ISO8601)')
   .option('-r, --reason <reason>', 'Reason')
@@ -524,17 +548,19 @@ task
     const t = taskWait(store, {
       task_id: id,
       wake_at: opts.wakeAt,
+      lease_token: opts.leaseToken,
       reason: opts.reason,
     });
     console.log(`✓ Task WAITING: ${t.id}  wake_at=${t.wake_at}`);
   });
 task
   .command('block <task_id>')
+  .option('--lease-token <token>', 'Token returned by a fenced claim')
   .description('Mark task BLOCKED (need Human)')
   .requiredOption('-r, --reason <reason>', 'Reason')
   .action((id, opts) => {
     const store = getStore();
-    const t = taskBlock(store, { task_id: id, reason: opts.reason });
+    const t = taskBlock(store, { task_id: id, lease_token: opts.leaseToken, reason: opts.reason });
     console.log(`✓ Task BLOCKED: ${t.id}`);
   });
 
@@ -693,6 +719,7 @@ verify
 
 program
   .command('recover <task_id>')
+  .option('--lease-token <token>', 'Token returned by a fenced claim')
   .description('Apply recover Skill to a Task after a failure')
   .requiredOption('--status <status>', 'Last verify status: PASS|FAIL|UNKNOWN')
   .option('--error-type <type>', 'Error type from ToolResult.error')
@@ -710,7 +737,7 @@ program
         ? { type: opts.errorType, message: opts.observation ?? '', retryable: false }
         : null,
     };
-    const decision = applyRecovery(store, task, result);
+    const decision = applyRecovery(store, task, result, 'recover-cli', opts.leaseToken);
     console.log(JSON.stringify(decision, null, 2));
     process.exit(decision.decision.action === 'block' ? 1 : 0);
   });
