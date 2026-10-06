@@ -48,7 +48,11 @@ function gollum(args: string[], cwd?: string): { out: string; code: number } {
 
 before(() => {
   dbDir = mkdtempSync(join(tmpdir(), 'gollum-cli-smoke-'));
-  env = { ...process.env, GOLLUM_DB_PATH: join(dbDir, 'smoke.db') };
+  const home = mkdtempSync(join(tmpdir(), 'gollum-cli-smoke-home-'));
+  // `doctor` reads ~/.gollum, so an inherited HOME makes this pass or fail
+  // depending on whether the developer happens to have gollum installed globally.
+  mkdirSync(join(home, '.gollum'), { recursive: true });
+  env = { ...process.env, HOME: home, USERPROFILE: home, GOLLUM_DB_PATH: join(dbDir, 'smoke.db') };
   // --cwd is not optional here: `init` writes .gollum/project.yaml into its
   // target, and without it the test would bind the gollum repo to itself.
   if (built) gollum(['init', '--cwd', dbDir, '-n', 'cli-smoke']);

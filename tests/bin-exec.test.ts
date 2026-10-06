@@ -20,7 +20,7 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, statSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,8 +33,10 @@ const bins = (pkg.bin ?? {}) as Record<string, string>;
 const names = Object.keys(bins);
 
 let dbDir: string;
+let homeDir: string;
 before(() => {
   dbDir = mkdtempSync(join(tmpdir(), 'gollum-bin-'));
+  homeDir = mkdtempSync(join(tmpdir(), 'gollum-bin-home-'));
 });
 
 const built = names.every((n) => existsSync(join(ROOT, bins[n])));
@@ -113,7 +115,11 @@ test('package.json "files" only lists paths that exist', () => {
 });
 
 test('doctor passes on a freshly built tree', { skip }, () => {
-  const env = { ...process.env, GOLLUM_DB_PATH: join(dbDir, 'bin.db') };
+  // `doctor` errors when ~/.gollum is absent, so give it a throwaway HOME instead
+  // of inheriting the developer's; otherwise this only passes on an installed machine.
+  mkdirSync(join(homeDir, '.gollum'), { recursive: true });
+  const env = { ...process.env, HOME: homeDir, USERPROFILE: homeDir,
+    GOLLUM_DB_PATH: join(dbDir, 'bin.db') };
   const out = execFileSync(join(ROOT, bins.gollum), ['doctor'], {
     env,
     encoding: 'utf-8',
